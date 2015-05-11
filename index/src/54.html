@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\mainchangeset.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Windows.Forms;
+
+namespace CKAN
+{
+    public partial class Main
+    {
+
+        private List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt; m_Changeset;
+
+        public void UpdateChangesDialog(List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt; changeset, BackgroundWorker installWorker)
+        {
+            m_Changeset = changeset;
+            m_InstallWorker = installWorker;
+            ChangesListView.Items.Clear();
+
+            if (changeset == null)
+            {
+                return;
+            }
+
+            foreach (var change in changeset)
+            {
+                if (change.Value == GUIModChangeType.None)
+                {
+                    continue;
+                }
+
+                var item = new ListViewItem {Text = String.Format(&quot;{0} {1}&quot;, change.Key.name, change.Key.version)};
+
+                var subChangeType = new ListViewItem.ListViewSubItem {Text = change.Value.ToString()};
+
+                item.SubItems.Add(subChangeType);
+                ChangesListView.Items.Add(item);
+            }
+        }
+
+        private void CancelChangesButton_Click(object sender, EventArgs e)
+        {
+            UpdateModsList();
+            UpdateChangesDialog(null, m_InstallWorker);
+            m_TabController.ShowTab(&quot;ManageModsTabPage&quot;);
+            m_TabController.HideTab(&quot;ChangesetTabPage&quot;);
+            ApplyToolButton.Enabled = false;
+        }
+
+        private void ConfirmChangesButton_Click(object sender, EventArgs e)
+        {
+            if (m_Changeset == null)
+                return;
+
+            menuStrip1.Enabled = false;
+
+            RelationshipResolverOptions install_ops = RelationshipResolver.DefaultOpts();
+            install_ops.with_recommends = false;
+            
+            m_InstallWorker.RunWorkerAsync(
+                new KeyValuePair&lt;List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;, RelationshipResolverOptions&gt;(
+                    m_Changeset, install_ops));
+            m_Changeset = null;
+
+            UpdateChangesDialog(null, m_InstallWorker);
+            ShowWaitDialog();
+        }
+
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[14,9,14,10,0],[15,13,15,37,0],[16,13,16,45,0],[17,13,17,43,0],[19,13,19,35,0],[20,13,20,14,0],[21,17,21,24,0],[24,13,24,20,0],[24,36,24,45,0],[24,22,24,32,0],[25,13,25,14,0],[26,17,26,59,0],[27,17,27,18,0],[28,21,28,30,0],[31,17,31,116,0],[33,17,33,103,0],[35,17,35,50,0],[36,17,36,49,0],[37,13,37,14,0],[24,33,24,35,0],[38,9,38,10,0],[41,9,41,10,0],[42,13,42,30,0],[43,13,43,56,0],[44,13,44,58,0],[45,13,45,57,0],[46,13,46,45,0],[47,9,47,10,0],[50,9,50,10,0],[51,13,51,37,0],[52,17,52,24,0],[54,13,54,40,0],[56,13,56,90,0],[57,13,57,49,0],[59,13,61,48,0],[62,13,62,32,0],[64,13,64,56,0],[65,13,65,30,0],[66,9,66,10,0]]);
+    </script>
+  </body>
+</html>

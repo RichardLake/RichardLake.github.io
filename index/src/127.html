@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\jenkins\jenkinsapi.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Linq;
+using System.Net;
+using System.Text.RegularExpressions;
+using log4net;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
+namespace CKAN.NetKAN
+{
+    // Jenkins API
+    public class JenkinsAPI
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof (JenkinsAPI));
+        private static readonly WebClient web = new WebClient();
+
+        public JenkinsAPI()
+        {
+            web.Headers.Add(&quot;user-agent&quot;, Net.UserAgentString);
+        }
+
+        public static string Call(string path)
+        {
+            Uri url = new Uri (path);
+            log.DebugFormat(&quot;Calling {0}&quot;, url);
+
+            string result = &quot;&quot;;
+            try
+            {
+                result = web.DownloadString(url);
+            }
+            catch(WebException webEx)
+            {
+                log.ErrorFormat (&quot;WebException while accessing {0}: {1}&quot;, url, webEx);
+                throw webEx;
+            }
+
+            return result;
+        }
+
+        public static JenkinsBuild GetLatestBuild(string baseUri, string versionBase, bool stable = true)
+        {
+            JenkinsBuild result = null;
+            if (!(baseUri.EndsWith (&quot;/&quot;)))
+            {
+                baseUri = baseUri + &quot;/&quot;;
+            }
+
+            // http://jenkins.mumech.com/job/MechJeb2/lastStableBuild/api/json
+            string json = Call (baseUri + &quot;lastStableBuild/api/json&quot;);
+            JObject build = JObject.Parse (json);
+            if (build != null) 
+            {
+                string buildNumber = (string) build [&quot;number&quot;];
+
+                JArray artifacts = (JArray) build [&quot;artifacts&quot;];
+                log.DebugFormat(&quot;  Parsing artifacts from {0}&quot;, artifacts);
+                foreach (JObject artifact in artifacts.Children())
+                {
+                    log.DebugFormat(&quot;    Parsing artifact from {0}&quot;, artifact);
+
+                    string fileName = (string) artifact [&quot;fileName&quot;];
+
+                    // TODO - filtering of artifacts, for now hardcoded for zip files.
+                    if (fileName.EndsWith (&quot;.zip&quot;))
+                    {
+                        result = new JenkinsBuild (artifact, versionBase, buildNumber, baseUri, stable);
+                    }
+                }
+            }
+
+            return result;
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[17,9,17,28,0],[18,9,18,10,0],[19,13,19,64,0],[20,9,20,10,0],[23,9,23,10,0],[24,13,24,38,0],[25,13,25,49,0],[27,13,27,32,0],[29,13,29,14,0],[30,17,30,50,0],[31,13,31,14,0],[32,13,32,38,0],[33,13,33,14,0],[34,17,34,87,0],[35,17,35,29,0],[38,13,38,27,0],[39,9,39,10,0],[42,9,42,10,0],[43,13,43,40,0],[44,13,44,43,0],[45,13,45,14,0],[46,17,46,41,0],[47,13,47,14,0],[50,13,50,71,0],[51,13,51,50,0],[52,13,52,31,0],[53,13,53,14,0],[54,17,54,64,0],[56,17,56,65,0],[57,17,57,76,0],[58,17,58,24,0],[58,46,58,66,0],[58,26,58,42,0],[59,17,59,18,0],[60,21,60,80,0],[62,21,62,70,0],[65,21,65,52,0],[66,21,66,22,0],[67,25,67,105,0],[68,21,68,22,0],[69,17,69,18,0],[58,43,58,45,0],[70,13,70,14,0],[72,13,72,27,0],[73,9,73,10,0],[14,9,14,86,0],[15,9,15,65,0]]);
+    </script>
+  </body>
+</html>

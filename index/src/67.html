@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\renameinstancedialog.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Windows.Forms;
+
+namespace CKAN
+{
+    public partial class RenameInstanceDialog : FormCompatibility
+    {
+        public RenameInstanceDialog()
+        {
+            InitializeComponent();
+            ApplyFormCompatibilityFixes();
+
+            // Set the default actions for pressing Enter and Escape.
+            AcceptButton = OKButton;
+            CancelButton = CancelRenameInstanceButton;
+        }
+
+        public DialogResult ShowRenameInstanceDialog(string name)
+        {
+            NameTextBox.Text = name;
+            return ShowDialog();
+        }
+
+        public string GetResult()
+        {
+            return NameTextBox.Text;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[7,9,7,38,0],[8,9,8,10,0],[9,13,9,35,0],[10,13,10,43,0],[13,13,13,37,0],[14,13,14,55,0],[15,9,15,10,0],[18,9,18,10,0],[19,13,19,37,0],[20,13,20,33,0],[21,9,21,10,0],[24,9,24,10,0],[25,13,25,37,0],[26,9,26,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\types\repository.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using Newtonsoft.Json;
+
+namespace CKAN
+{
+    public class Repository
+    {
+        [JsonIgnore] public static readonly string default_ckan_repo_name = &quot;default&quot;;
+        [JsonIgnore] public static readonly Uri default_ckan_repo_uri = new Uri(&quot;https://github.com/KSP-CKAN/CKAN-meta/archive/master.zip&quot;);
+        [JsonIgnore] public static readonly Uri default_repo_master_list = new Uri(&quot;http://api.ksp-ckan.org/mirrors&quot;);
+
+        public string name;
+        public Uri uri;
+        public int priority = 0;
+        public Boolean ckan_mirror = false;
+
+        public Repository()
+        {
+        }
+
+        public Repository(string name, string uri)
+        {
+            this.name = name;
+            this.uri = new Uri(uri);
+        }
+
+        public Repository(string name, Uri uri)
+        {
+            this.name = name;
+            this.uri = uri;
+        }
+
+        public override string ToString()
+        {
+            return String.Format(&quot;{0} ({1}, {2})&quot;, name, priority, uri.ToString());
+        }
+    }
+
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[14,9,14,33,1],[15,9,15,44,1],[17,9,17,28,0],[18,9,18,10,0],[19,9,19,10,0],[21,9,21,51,0],[22,9,22,10,0],[23,13,23,30,0],[24,13,24,37,0],[25,9,25,10,0],[34,9,34,10,0],[35,13,35,84,0],[36,9,36,10,0],[27,9,27,48,1],[28,9,28,10,1],[29,13,29,30,1],[30,13,30,28,1],[31,9,31,10,1],[8,22,8,87,1],[9,22,9,141,1],[10,22,10,119,1]]);
+    </script>
+  </body>
+</html>

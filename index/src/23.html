@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\net\net.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Net;
+using System.IO;
+using System.Text.RegularExpressions;
+using ChinhDo.Transactions;
+using log4net;
+using CurlSharp;
+
+namespace CKAN
+{
+    /// &lt;summary&gt;
+    ///     Doing something with the network? Do it here.
+    /// &lt;/summary&gt;
+
+    public class Net
+    {
+        public static string UserAgentString = &quot;Mozilla/4.0 (compatible; CKAN)&quot;;
+
+        private static readonly ILog log = LogManager.GetLogger(typeof (Net));
+        private static TxFileManager file_transaction = new TxFileManager();
+
+        /// &lt;summary&gt;
+        ///     Downloads the specified url, and stores it in the filename given.
+        ///     If no filename is supplied, a temporary file will be generated.
+        ///     Returns the filename the file was saved to on success.
+        ///     Throws an exception on failure.
+        ///     Throws a MissingCertificateException *and* prints a message to the
+        ///     console if we detect missing certificates (common on a fresh Linux/mono install)
+        /// &lt;/summary&gt;
+        public static string Download(Uri url, string filename = null, IUser user = null)
+        {
+            return Download(url.OriginalString, filename, user);
+        }
+
+        public static string Download(string url, string filename = null, IUser user = null)
+        {
+            user = user ?? new NullUser();
+            user.RaiseMessage(&quot;Downloading {0}&quot;, url);
+
+            // Generate a temporary file if none is provided.
+            if (filename == null)
+            {
+                filename = file_transaction.GetTempFileName();
+            }
+
+            log.DebugFormat(&quot;Downloading {0} to {1}&quot;, url, filename);
+
+            var agent = new WebClient();
+            agent.Headers.Add(&quot;user-agent&quot;, UserAgentString);
+           
+            try
+            {
+                agent.DownloadFile(url, filename);
+            }
+            catch (Exception ex)
+            {
+
+                log.InfoFormat(&quot;Download failed, trying with curlsharp...&quot;);
+
+                try
+                {
+                    Curl.Init();
+
+                    using (FileStream stream = File.OpenWrite(filename))
+                    using (var curl = Curl.CreateEasy(url, stream))
+                    {
+                        CurlCode result = curl.Perform();
+                        if (result != CurlCode.Ok)
+                        {
+                            throw new Kraken(&quot;curl download of &quot; + url + &quot; failed with CurlCode &quot; + result);
+                        }
+                        else
+                        {
+                            log.Debug(&quot;curlsharp download successful&quot;);
+                        }
+                    }
+
+                    Curl.CleanUp();
+                    return filename;
+                }
+                catch
+                {
+                    // D&#39;oh, failed again. Fall through to clean-up handling.
+                }
+
+                // Clean up our file, it&#39;s unlikely to be complete.
+                // We do this even though we&#39;re using transactional files, as we may not be in a transaction.
+                // It&#39;s okay if this fails.
+                try
+                {
+                    log.DebugFormat(&quot;Removing {0} after web error failure&quot;, filename);
+                    file_transaction.Delete(filename);
+                }
+                catch
+                {
+                    // Apparently we need a catch, even if we do nothing.
+                }
+
+                // Look for an exception regarding the authentication.
+                if (Regex.IsMatch(ex.ToString(), &quot;The authentication or decryption has failed.&quot;))
+                {
+                    throw new MissingCertificateKraken(&quot;Failed downloading &quot; + url, ex);
+                }
+
+                // Not the exception we were looking for! Throw it further upwards!
+                throw;
+            }
+
+            return filename;
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[64,28,64,72,0],[65,28,65,67,0],[66,21,66,22,0],[67,25,67,58,0],[68,25,68,51,0],[69,25,69,26,0],[70,29,70,109,0],[73,25,73,26,0],[74,29,74,72,0],[75,25,75,26,0],[76,21,76,22,0],[78,21,78,36,0],[79,21,79,37,0],[94,17,94,22,0],[95,17,95,18,0],[97,17,97,18,0],[101,17,101,18,0],[102,21,102,89,0],[31,9,31,10,1],[32,13,32,65,1],[33,9,33,10,1],[36,9,36,10,1],[37,13,37,43,1],[38,13,38,55,1],[41,13,41,34,1],[42,13,42,14,1],[43,17,43,63,1],[44,13,44,14,1],[46,13,46,70,1],[48,13,48,41,1],[49,13,49,62,1],[52,13,52,14,1],[53,17,53,51,1],[54,13,54,14,1],[55,13,55,33,1],[56,13,56,14,1],[58,17,58,77,1],[61,17,61,18,1],[62,21,62,33,1],[81,17,81,22,1],[82,17,82,18,1],[84,17,84,18,1],[90,17,90,18,1],[91,21,91,87,1],[92,21,92,55,1],[93,17,93,18,1],[100,17,100,98,1],[106,17,106,23,1],[109,13,109,29,1],[110,9,110,10,1],[17,9,17,81,1],[19,9,19,79,1],[20,9,20,77,1]]);
+    </script>
+  </body>
+</html>

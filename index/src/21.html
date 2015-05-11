@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\types\moduleinstalldescriptor.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.Serialization;
+using System.Text.RegularExpressions;
+using ICSharpCode.SharpZipLib.Zip;
+using Newtonsoft.Json;
+using System.IO;
+
+namespace CKAN
+{
+    [JsonObject(MemberSerialization.OptIn)]
+    public class ModuleInstallDescriptor : ICloneable
+    {
+
+        #region Properties
+
+        // Either file or find is required, we check this manually at deserialise.
+        [JsonProperty(&quot;file&quot;)]
+        public string file;
+
+        [JsonProperty(&quot;find&quot;)]
+        public string find;
+
+        [JsonProperty(&quot;install_to&quot;, Required = Required.Always)]
+        public string install_to;
+
+        [JsonProperty(&quot;filter&quot;)]
+        [JsonConverter(typeof (JsonSingleOrArrayConverter&lt;string&gt;))]
+        public List&lt;string&gt; filter;
+
+        [JsonProperty(&quot;filter_regexp&quot;)]
+        [JsonConverter(typeof (JsonSingleOrArrayConverter&lt;string&gt;))]
+        public List&lt;string&gt; filter_regexp;
+
+        [OnDeserialized]
+        internal void DeSerialisationFixes(StreamingContext like_i_could_care)
+        {
+            // Make sure our install_to fields exists. We may be able to remove
+            // this check now that we&#39;re doing better json-fu above.
+            if (install_to == null)
+            {
+                throw new BadMetadataKraken(null, &quot;Install stanzas must have a file an install_to&quot;);
+            }
+
+            // Make sure we have either a `file` or a `find` stanza.
+            if (file == null &amp;&amp; find == null)
+            {
+                throw new BadMetadataKraken(null, &quot;Install stanzas require either a file or find directive&quot;);
+            }
+
+            if (file != null &amp;&amp; find != null)
+            {
+                throw new BadMetadataKraken(null, &quot;Install stanzas may not include both file AND find directives&quot;);
+            }
+        }
+
+        #endregion
+
+        #region Constructors and clones
+
+        [JsonConstructor]
+        private ModuleInstallDescriptor()
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Returns a deep clone of our object. Implements ICloneable.
+        /// &lt;/summary&gt;
+        public object Clone()
+        {
+            // Deep clone our object by running it through a serialisation cycle.
+            string json = JsonConvert.SerializeObject(this, Formatting.None);
+            return JsonConvert.DeserializeObject&lt;ModuleInstallDescriptor&gt;(json);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns a default install stanza for the identifer provided.
+        /// &lt;/summary&gt;
+        public static ModuleInstallDescriptor DefaultInstallStanza(string ident, ZipFile zipfile)
+        {
+            // Really this is just making a dummy `find` stanza and returning the processed
+            // result.
+            var stanza = new ModuleInstallDescriptor();
+            stanza.install_to = &quot;GameData&quot;;
+            stanza.find = ident;
+            return stanza.ConvertFindToFile(zipfile);
+        }
+
+        #endregion
+
+        /// &lt;summary&gt;
+        /// Returns true if the path provided should be installed by this stanza.
+        /// Can *only* be used on `file` stanzas, throws an UnsupportedKraken if called
+        /// on a `find` stanza.
+        /// Use `ConvertFindToFile` to convert `find` to `file` stanzas.
+        /// &lt;/summary&gt;
+        public bool IsWanted(string path)
+        {
+            if (file == null)
+            {
+                throw new UnsupportedKraken(&quot;.IsWanted only works with `file` stanzas.&quot;);
+            }
+
+            // Make sure our path always uses slashes we expect.
+            string normalised_path = path.Replace(&#39;\\&#39;, &#39;/&#39;);
+
+            // We want everthing that matches our &#39;file&#39;, either as an exact match,
+            // or as a path leading up to it.
+            string wanted_filter = &quot;^&quot; + Regex.Escape(file) + &quot;(/|$)&quot;;
+
+            // If it doesn&#39;t match our install path, ignore it.
+            if (! Regex.IsMatch(normalised_path, wanted_filter))
+            {
+                return false;
+            }
+
+            // Skip the file if it&#39;s a ckan file, these should never be copied to GameData.
+            if (Regex.IsMatch(normalised_path, &quot;.ckan$&quot;, RegexOptions.IgnoreCase))
+            {
+                return false;
+            }
+
+            // Get all our path segments. If our filter matches of any them, skip.
+            // All these comparisons are case insensitive.
+            var path_segments = new List&lt;string&gt;(normalised_path.ToLower().Split(&#39;/&#39;));
+
+            if (filter != null &amp;&amp; filter.Any(filter_text =&gt; path_segments.Contains(filter_text.ToLower())))
+            {
+                return false;
+            }
+
+            if (filter_regexp == null)
+            {
+                return true;
+            }
+
+            // Finally, check our filter regexpes.
+            return filter_regexp.All(regexp =&gt; !Regex.IsMatch(normalised_path, regexp));
+        }
+
+        /// &lt;summary&gt;
+        /// Given a zipfile, returns a `file` ModuleInstallDescriptor that can be used for
+        /// installation.
+        /// Returns `this` if already of a `file` type.
+        /// &lt;/summary&gt;
+        public ModuleInstallDescriptor ConvertFindToFile(ZipFile zipfile)
+        {
+            // If we&#39;re already a file type stanza, then we have nothing to do.
+            if (this.file != null)
+            {
+                return this;
+            }
+
+            var stanza = (ModuleInstallDescriptor) this.Clone();
+
+            // Candidate top-level directories.
+            var candidate_set = new HashSet&lt;string&gt;();
+
+            // Match *only* things with our find string as a directory.
+            // We can&#39;t just look for directories, because some zipfiles
+            // don&#39;t include entries for directories, but still include entries
+            // for the files they contain.
+
+            string filter = @&quot;(?:^|/)&quot; + Regex.Escape(this.find) + @&quot;$&quot;;
+
+            // Let&#39;s find that directory
+
+            // Normalise our path.
+            var normalised = zipfile.Cast&lt;ZipEntry&gt;().Select(entry =&gt; Path.GetDirectoryName(entry.Name))
+                .Select(directory =&gt;
+                {
+                    var dir = directory.Replace(&#39;\\&#39;, &#39;/&#39;);
+                    return Regex.Replace(dir, &quot;/$&quot;, &quot;&quot;);
+                });
+
+            // If this looks like what we&#39;re after, remember it.
+            var directories = normalised.Where(directory =&gt; Regex.IsMatch(directory, filter, RegexOptions.IgnoreCase));
+            candidate_set.UnionWith(directories);
+
+            // Sort to have shortest first. It&#39;s not *quite* top-level directory order,
+            // but it&#39;s good enough for now.
+            var candidates = new List&lt;string&gt;(candidate_set);
+            candidates.Sort((a,b) =&gt; a.Length.CompareTo(b.Length));
+
+            if (candidates.Count == 0)
+            {
+                throw new FileNotFoundKraken(
+                    this.find,
+                    String.Format(&quot;Could not find {0} directory in zipfile to install&quot;, this.find)
+                );
+            }
+
+            // Fill in our stanza, and remove our old `find` info.
+            stanza.file = candidates[0];
+            stanza.find = null;
+            return stanza;
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[42,13,42,14,0],[43,17,43,101,0],[48,13,48,14,0],[49,17,49,110,0],[53,13,53,14,0],[54,17,54,116,0],[101,13,101,14,0],[102,17,102,90,0],[120,13,120,14,0],[121,17,121,30,0],[184,38,184,66,0],[38,9,38,10,1],[41,13,41,36,1],[47,13,47,46,1],[52,13,52,46,1],[56,9,56,10,1],[63,9,63,42,1],[64,9,64,10,1],[65,9,65,10,1],[71,9,71,10,1],[73,13,73,78,1],[74,13,74,81,1],[75,9,75,10,1],[81,9,81,10,1],[84,13,84,56,1],[85,13,85,44,1],[86,13,86,33,1],[87,13,87,54,1],[88,9,88,10,1],[99,9,99,10,1],[100,13,100,30,1],[106,13,106,62,1],[110,13,110,71,1],[113,13,113,65,1],[114,13,114,14,1],[115,17,115,30,1],[119,13,119,83,1],[126,13,126,88,1],[128,13,128,61,1],[128,106,128,108,1],[129,13,129,14,1],[130,17,130,30,1],[133,13,133,39,1],[134,13,134,14,1],[135,17,135,29,1],[139,13,139,48,1],[139,87,139,89,1],[140,9,140,10,1],[148,9,148,10,1],[150,13,150,35,1],[151,13,151,14,1],[152,17,152,29,1],[155,13,155,65,1],[158,13,158,55,1],[165,13,165,73,1],[170,13,170,71,1],[170,104,172,17,1],[172,18,173,21,1],[173,60,174,21,1],[174,57,175,17,1],[175,18,175,20,1],[178,13,178,61,1],[178,118,178,120,1],[179,13,179,50,1],[183,13,183,62,1],[184,13,184,38,1],[184,66,184,68,1],[186,13,186,39,1],[187,13,187,14,1],[188,17,191,19,1],[195,13,195,41,1],[196,13,196,32,1],[197,13,197,27,1],[198,9,198,10,1],[128,61,128,106,1],[139,48,139,87,1],[178,61,178,118,1],[170,71,170,104,1],[172,17,172,18,1],[173,21,173,60,1],[174,21,174,57,1],[175,17,175,18,1]]);
+    </script>
+  </body>
+</html>

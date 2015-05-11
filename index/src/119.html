@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-cmdline\action\upgrade.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
+using log4net;
+
+namespace CKAN.CmdLine
+{
+    public class Upgrade : ICommand
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof(Upgrade));
+
+        public IUser User { get; set; }
+
+        public Upgrade(IUser user)
+        {
+            User = user;
+        }
+
+
+        public int RunCommand(CKAN.KSP ksp, object raw_options)
+        {
+            UpgradeOptions options = (UpgradeOptions) raw_options;
+
+            if (options.ckan_file != null)
+            {                
+                options.modules.Add(LoadCkanFromFile(ksp, options.ckan_file).identifier);
+            }
+
+            if (options.modules.Count == 0 &amp;&amp; ! options.upgrade_all)
+            {
+                // What? No files specified?
+                User.RaiseMessage(&quot;Usage: ckan upgrade Mod [Mod2, ...]&quot;);
+                User.RaiseMessage(&quot;  or   ckan upgrade --all&quot;);
+                User.RaiseMessage(&quot;  or   ckan upgrade ckan&quot;);
+                return Exit.BADOPT;
+            }
+
+            if (!options.upgrade_all &amp;&amp; options.modules[0] == &quot;ckan&quot;)
+            {
+                User.RaiseMessage(&quot;Querying the latest CKAN version&quot;);
+                var latestVersion = AutoUpdate.FetchLatestCkanVersion();
+                var currentVersion = new Version(Meta.Version());
+
+                if (latestVersion.IsGreaterThan(currentVersion))
+                {
+                    User.RaiseMessage(&quot;New CKAN version available - &quot; + latestVersion.ToString());
+                    var releaseNotes = AutoUpdate.FetchLatestCkanVersionReleaseNotes();
+                    User.RaiseMessage(releaseNotes);
+                    User.RaiseMessage(&quot;\n&quot;);
+
+                    if (User.RaiseYesNoDialog(&quot;Proceed with install?&quot;))
+                    {
+                        User.RaiseMessage(&quot;Upgrading CKAN, please wait..&quot;);
+                        AutoUpdate.StartUpdateProcess(false);
+                    }
+                }
+                else
+                {
+                    User.RaiseMessage(&quot;You already have the latest version.&quot;);
+                }
+
+                return Exit.OK;
+            }
+
+            User.RaiseMessage(&quot;\nUpgrading modules...\n&quot;);
+
+            try
+            {
+                if (options.upgrade_all)
+                {
+                    var installed = new Dictionary&lt;string, Version&gt;(ksp.Registry.Installed());
+                    var to_upgrade = new List&lt;CkanModule&gt;();
+
+                    foreach (KeyValuePair&lt;string, Version&gt; mod in installed)
+                    {
+                        Version current_version = mod.Value;
+
+                        if ((current_version is ProvidesVersion) || (current_version is DllVersion))
+                        {
+                            continue;
+                        }
+                        else
+                        {
+                            try
+                            {
+                                // Check if upgrades are available
+                                CkanModule latest = ksp.Registry.LatestAvailable(mod.Key, ksp.Version());
+
+                                if (latest.version.IsGreaterThan(mod.Value))
+                                {
+                                    // Upgradable
+                                    log.InfoFormat(&quot;New version {0} found for {1}&quot;,
+                                        latest.version, latest.identifier);
+                                    to_upgrade.Add(latest);
+                                }
+
+                            }
+                            catch (ModuleNotFoundKraken)
+                            {
+                                log.InfoFormat(&quot;{0} is installed, but no longer in the registry&quot;,
+                                    mod.Key);
+                            }
+                        }
+
+                    }
+
+                    ModuleInstaller.GetInstance(ksp, User).Upgrade(to_upgrade, new NetAsyncDownloader(User));
+                }
+                else
+                {
+                    // TODO: These instances all need to go.
+                    ModuleInstaller.GetInstance(ksp, User).Upgrade(options.modules, new NetAsyncDownloader(User));
+                }
+            }
+            catch (ModuleNotFoundKraken kraken)
+            {
+                User.RaiseMessage(kraken.Message);
+                return Exit.ERROR;
+            }
+            User.RaiseMessage(&quot;\nDone!\n&quot;);
+
+            return Exit.OK;
+        }
+
+        internal static CkanModule LoadCkanFromFile(CKAN.KSP current_instance, string ckan_file)
+        {
+            CkanModule module = CkanModule.FromFile(ckan_file);
+
+            // We&#39;ll need to make some registry changes to do this.
+            RegistryManager registry_manager = RegistryManager.Instance(current_instance);
+
+            // Remove this version of the module in the registry, if it exists.
+            registry_manager.registry.RemoveAvailable(module);
+
+            // Sneakily add our version in...
+            registry_manager.registry.AddAvailable(module);
+
+            return module;
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[12,29,12,33,0],[12,34,12,38,0],[14,9,14,35,0],[16,13,16,25,0],[17,9,17,10,0],[22,13,22,67,0],[24,13,24,43,0],[26,17,26,90,0],[29,13,29,69,0],[32,17,32,74,0],[33,17,33,64,0],[34,17,34,63,0],[35,17,35,36,0],[38,13,38,70,0],[40,17,40,71,0],[41,17,41,73,0],[42,17,42,66,0],[44,17,44,65,0],[46,21,46,99,0],[47,21,47,88,0],[48,21,48,53,0],[49,21,49,45,0],[51,21,51,72,0],[53,25,53,76,0],[54,25,54,62,0],[56,17,56,18,0],[59,21,59,79,0],[62,17,62,32,0],[65,13,65,59,0],[69,17,69,41,0],[71,21,71,95,0],[72,21,72,61,0],[74,67,74,76,0],[74,30,74,63,0],[76,25,76,61,0],[78,25,78,101,0],[87,33,87,106,0],[89,33,89,77,0],[92,37,93,76,0],[94,37,94,60,0],[97,29,97,30,0],[98,29,98,57,0],[100,33,101,46,0],[102,29,102,30,0],[74,64,74,66,0],[107,21,107,110,0],[108,17,108,18,0],[112,21,112,115,0],[114,13,114,14,0],[115,13,115,48,0],[117,17,117,51,0],[118,17,118,35,0],[120,13,120,44,0],[122,13,122,28,0],[123,9,123,10,0],[127,13,127,64,0],[130,13,130,91,0],[133,13,133,63,0],[136,13,136,60,0],[138,13,138,27,0],[10,9,10,82,0]]);
+    </script>
+  </body>
+</html>

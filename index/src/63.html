@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\newupdatedialog.designer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+namespace CKAN
+{
+    partial class NewUpdateDialog
+    {
+        /// &lt;summary&gt;
+        /// Required designer variable.
+        /// &lt;/summary&gt;
+        private System.ComponentModel.IContainer components = null;
+
+        /// &lt;summary&gt;
+        /// Clean up any resources being used.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;disposing&quot;&gt;true if managed resources should be disposed; otherwise, false.&lt;/param&gt;
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing &amp;&amp; (components != null))
+            {
+                components.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        #region Windows Form Designer generated code
+
+        /// &lt;summary&gt;
+        /// Required method for Designer support - do not modify
+        /// the contents of this method with the code editor.
+        /// &lt;/summary&gt;
+        private void InitializeComponent()
+        {
+            this.label1 = new System.Windows.Forms.Label();
+            this.VersionLabel = new System.Windows.Forms.Label();
+            this.ReleaseNotesTextbox = new System.Windows.Forms.TextBox();
+            this.InstallUpdateButton = new System.Windows.Forms.Button();
+            this.CancelUpdateButton = new System.Windows.Forms.Button();
+            this.SuspendLayout();
+            // 
+            // label1
+            // 
+            this.label1.AutoSize = true;
+            this.label1.Font = new System.Drawing.Font(&quot;Microsoft Sans Serif&quot;, 8.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.label1.Location = new System.Drawing.Point(9, 9);
+            this.label1.Name = &quot;label1&quot;;
+            this.label1.Size = new System.Drawing.Size(53, 13);
+            this.label1.TabIndex = 0;
+            this.label1.Text = &quot;Version:&quot;;
+            // 
+            // VersionLabel
+            // 
+            this.VersionLabel.AutoSize = true;
+            this.VersionLabel.Font = new System.Drawing.Font(&quot;Microsoft Sans Serif&quot;, 8.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.VersionLabel.Location = new System.Drawing.Point(68, 9);
+            this.VersionLabel.Name = &quot;VersionLabel&quot;;
+            this.VersionLabel.Size = new System.Drawing.Size(43, 13);
+            this.VersionLabel.TabIndex = 1;
+            this.VersionLabel.Text = &quot;v0.0.0&quot;;
+            // 
+            // ReleaseNotesTextbox
+            // 
+            this.ReleaseNotesTextbox.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.ReleaseNotesTextbox.Location = new System.Drawing.Point(12, 25);
+            this.ReleaseNotesTextbox.Multiline = true;
+            this.ReleaseNotesTextbox.Name = &quot;ReleaseNotesTextbox&quot;;
+            this.ReleaseNotesTextbox.ReadOnly = true;
+            this.ReleaseNotesTextbox.Size = new System.Drawing.Size(402, 246);
+            this.ReleaseNotesTextbox.TabIndex = 3;
+            // 
+            // InstallUpdateButton
+            // 
+            this.InstallUpdateButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.InstallUpdateButton.DialogResult = System.Windows.Forms.DialogResult.OK;
+            this.InstallUpdateButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.InstallUpdateButton.Location = new System.Drawing.Point(339, 277);
+            this.InstallUpdateButton.Name = &quot;InstallUpdateButton&quot;;
+            this.InstallUpdateButton.Size = new System.Drawing.Size(75, 23);
+            this.InstallUpdateButton.TabIndex = 4;
+            this.InstallUpdateButton.Text = &quot;Install&quot;;
+            this.InstallUpdateButton.UseVisualStyleBackColor = true;
+            // 
+            // CancelUpdateButton
+            // 
+            this.CancelUpdateButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.CancelUpdateButton.DialogResult = System.Windows.Forms.DialogResult.Cancel;
+            this.CancelUpdateButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.CancelUpdateButton.Location = new System.Drawing.Point(258, 277);
+            this.CancelUpdateButton.Name = &quot;CancelUpdateButton&quot;;
+            this.CancelUpdateButton.Size = new System.Drawing.Size(75, 23);
+            this.CancelUpdateButton.TabIndex = 5;
+            this.CancelUpdateButton.Text = &quot;Not now&quot;;
+            this.CancelUpdateButton.UseVisualStyleBackColor = true;
+            // 
+            // NewUpdateDialog
+            // 
+            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.ClientSize = new System.Drawing.Size(426, 310);
+            this.Controls.Add(this.CancelUpdateButton);
+            this.Controls.Add(this.InstallUpdateButton);
+            this.Controls.Add(this.ReleaseNotesTextbox);
+            this.Controls.Add(this.VersionLabel);
+            this.Controls.Add(this.label1);
+            this.MinimumSize = new System.Drawing.Size(354, 245);
+            this.Name = &quot;NewUpdateDialog&quot;;
+            this.Text = &quot;A new version of CKAN is available&quot;;
+            this.ResumeLayout(false);
+            this.PerformLayout();
+
+        }
+
+        #endregion
+
+        private System.Windows.Forms.Label label1;
+        private System.Windows.Forms.Label VersionLabel;
+        private System.Windows.Forms.TextBox ReleaseNotesTextbox;
+        private System.Windows.Forms.Button InstallUpdateButton;
+        private System.Windows.Forms.Button CancelUpdateButton;
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[8,9,8,68,0],[15,9,15,10,0],[16,13,16,51,0],[17,13,17,14,0],[18,17,18,38,0],[19,13,19,14,0],[20,13,20,37,0],[21,9,21,10,0],[30,9,30,10,0],[31,13,31,60,0],[32,13,32,66,0],[33,13,33,75,0],[34,13,34,74,0],[35,13,35,73,0],[36,13,36,34,0],[40,13,40,41,0],[41,13,41,166,0],[42,13,42,67,0],[43,13,43,41,0],[44,13,44,64,0],[45,13,45,38,0],[46,13,46,43,0],[50,13,50,47,0],[51,13,51,172,0],[52,13,52,74,0],[53,13,53,53,0],[54,13,54,70,0],[55,13,55,44,0],[56,13,56,47,0],[60,13,62,58,0],[63,13,63,82,0],[64,13,64,55,0],[65,13,65,67,0],[66,13,66,54,0],[67,13,67,79,0],[68,13,68,51,0],[72,13,72,171,0],[73,13,73,90,0],[74,13,74,86,0],[75,13,75,84,0],[76,13,76,67,0],[77,13,77,77,0],[78,13,78,51,0],[79,13,79,55,0],[80,13,80,69,0],[84,13,84,170,0],[85,13,85,93,0],[86,13,86,85,0],[87,13,87,83,0],[88,13,88,65,0],[89,13,89,76,0],[90,13,90,50,0],[91,13,91,54,0],[92,13,92,68,0],[96,13,96,74,0],[97,13,97,74,0],[98,13,98,65,0],[99,13,99,56,0],[100,13,100,57,0],[101,13,101,57,0],[102,13,102,50,0],[103,13,103,44,0],[104,13,104,66,0],[105,13,105,43,0],[106,13,106,62,0],[107,13,107,38,0],[108,13,108,34,0],[110,9,110,10,0]]);
+    </script>
+  </body>
+</html>

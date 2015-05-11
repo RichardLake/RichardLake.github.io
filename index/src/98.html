@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\tests\ckan\fileidentifier.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.IO;
+using NUnit.Framework;
+using Tests;
+
+namespace CKANTests
+{
+	[TestFixture]
+	public class FileIdentifier
+	{
+		[Test]
+		public void IdentifyASCII()
+		{
+			// Check that we have the zip files to compare against.
+			string ascii_file_1 = TestData.DataDir(&quot;FileIdentifier/test_ascii.txt&quot;);
+			string ascii_file_2 = TestData.DataDir(&quot;FileIdentifier/test_ascii.tmp&quot;);
+
+			Assert.IsTrue(File.Exists(ascii_file_1));
+			Assert.IsTrue(File.Exists(ascii_file_2));
+
+			// Check that both files return a tar type.
+			Assert.IsTrue(CKAN.FileIdentifier.IdentifyFile(ascii_file_1) == CKAN.FileType.ASCII);
+			Assert.IsTrue(CKAN.FileIdentifier.IdentifyFile(ascii_file_2) == CKAN.FileType.ASCII);
+		}
+
+		[Test]
+		public void IdentifyTar()
+		{
+			// Check that we have the zip files to compare against.
+			string tar_file_1 = TestData.DataDir(&quot;FileIdentifier/test_tar.tar&quot;);
+			string tar_file_2 = TestData.DataDir(&quot;FileIdentifier/test_tar.tmp&quot;);
+
+			Assert.IsTrue(File.Exists(tar_file_1));
+			Assert.IsTrue(File.Exists(tar_file_2));
+
+			// Check that both files return a tar type.
+			Assert.IsTrue(CKAN.FileIdentifier.IdentifyFile(tar_file_1) == CKAN.FileType.Tar);
+			Assert.IsTrue(CKAN.FileIdentifier.IdentifyFile(tar_file_2) == CKAN.FileType.Tar);
+		}
+
+		[Test]
+		public void IdentifyTarGz()
+		{
+			// Check that we have the zip files to compare against.
+			string targz_file_1 = TestData.DataDir(&quot;FileIdentifier/test_targz.tar.gz&quot;);
+			string targz_file_2 = TestData.DataDir(&quot;FileIdentifier/test_targz.tmp&quot;);
+
+			Assert.IsTrue(File.Exists(targz_file_1));
+			Assert.IsTrue(File.Exists(targz_file_2));
+
+			// Check that both files return a tar.gz type.
+			Assert.IsTrue(CKAN.FileIdentifier.IdentifyFile(targz_file_1) == CKAN.FileType.TarGz);
+			Assert.IsTrue(CKAN.FileIdentifier.IdentifyFile(targz_file_2) == CKAN.FileType.TarGz);
+		}
+
+		[Test]
+		public void IdentifyZip()
+		{
+			// Check that we have the zip files to compare against.
+			string zip_file_1 = TestData.DataDir(&quot;FileIdentifier/test_zip.zip&quot;);
+			string zip_file_2 = TestData.DataDir(&quot;FileIdentifier/test_zip.tmp&quot;);
+
+			Assert.IsTrue(File.Exists(zip_file_1));
+			Assert.IsTrue(File.Exists(zip_file_2));
+
+			// Check that both files return a zip type.
+			Assert.IsTrue(CKAN.FileIdentifier.IdentifyFile(zip_file_1) == CKAN.FileType.Zip);
+			Assert.IsTrue(CKAN.FileIdentifier.IdentifyFile(zip_file_2) == CKAN.FileType.Zip);
+		}
+	}
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[12,3,12,4,1],[14,4,14,76,1],[15,4,15,76,1],[17,4,17,45,1],[18,4,18,45,1],[21,4,21,89,1],[22,4,22,89,1],[23,3,23,4,1],[27,3,27,4,1],[29,4,29,72,1],[30,4,30,72,1],[32,4,32,43,1],[33,4,33,43,1],[36,4,36,85,1],[37,4,37,85,1],[38,3,38,4,1],[42,3,42,4,1],[44,4,44,79,1],[45,4,45,76,1],[47,4,47,45,1],[48,4,48,45,1],[51,4,51,89,1],[52,4,52,89,1],[53,3,53,4,1],[57,3,57,4,1],[59,4,59,72,1],[60,4,60,72,1],[62,4,62,43,1],[63,4,63,43,1],[66,4,66,85,1],[67,4,67,85,1],[68,3,68,4,1]]);
+    </script>
+  </body>
+</html>

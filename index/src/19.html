@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\registry\registry.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.Serialization;
+using System.Text.RegularExpressions;
+using System.Transactions;
+using log4net;
+using Newtonsoft.Json;
+
+namespace CKAN
+{
+    /// &lt;summary&gt;
+    /// This is the CKAN registry. All the modules that we know about or have installed
+    /// are contained in here.
+    /// &lt;/summary&gt;
+
+    // TODO: It would be *great* for the registry to have a &#39;dirty&#39; bit, that records if
+    // anything has changed. But that would involve catching access to a lot of the data
+    // structures we pass back, and we&#39;re not doing that yet.
+
+    public class Registry :IEnlistmentNotification
+    {
+        [JsonIgnore] private const int LATEST_REGISTRY_VERSION = 2;
+        [JsonIgnore] private static readonly ILog log = LogManager.GetLogger(typeof (Registry));
+
+        [JsonProperty] private int registry_version;
+
+        [JsonProperty(&quot;sorted_repositories&quot;)]
+        private SortedDictionary&lt;string, Repository&gt; repositories; // name =&gt; Repository
+
+        // TODO: These may be good as custom types, especially those which process
+        // paths (and flip from absolute to relative, and vice-versa).
+        [JsonProperty] internal Dictionary&lt;string, AvailableModule&gt; available_modules;
+        [JsonProperty] private Dictionary&lt;string, string&gt; installed_dlls; // name =&gt; path
+        [JsonProperty] private Dictionary&lt;string, InstalledModule&gt; installed_modules;
+        [JsonProperty] private Dictionary&lt;string, string&gt; installed_files; // filename =&gt; module
+
+        [JsonIgnore] private string transaction_backup;
+
+        /// &lt;summary&gt;
+        /// Returns all the activated registries, sorted by priority and name
+        /// &lt;/summary&gt;
+        [JsonIgnore] public SortedDictionary&lt;string, Repository&gt; Repositories
+        {
+            get { return this.repositories; }
+
+            // TODO writable only so it can be initialized, better ideas welcome
+            set { this.repositories = value; }
+        }
+
+        /// &lt;summary&gt;
+        /// Returns all the installed modules
+        /// &lt;/summary&gt;
+        [JsonIgnore] public ICollection&lt;InstalledModule&gt; InstalledModules
+        {
+            get { return installed_modules.Values; }
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the names of installed DLLs.
+        /// &lt;/summary&gt;
+        [JsonIgnore] public ICollection&lt;string&gt; InstalledDlls
+        {
+            get { return installed_dlls.Keys; }
+        }
+
+        #region Registry Upgrades
+
+        [OnDeserialized]
+        private void DeSerialisationFixes(StreamingContext context)
+        {
+            // Our context is our KSP install.
+            KSP ksp = (KSP) context.Context;
+
+
+            // Older registries didn&#39;t have the installed_files list, so we create one
+            // if absent.
+
+            if (installed_files == null)
+            {
+                log.Warn(&quot;Older registry format detected, adding installed files manifest...&quot;);
+                ReindexInstalled();
+            }
+
+            // If we have no registry version at all, then we&#39;re from the pre-release period.
+            // We would check for a null here, but ints *can&#39;t* be null.
+            if (registry_version == 0)
+            {
+                log.Warn(&quot;Older registry format detected, normalising paths...&quot;);
+
+                var normalised_installed_files = new Dictionary&lt;string,string&gt;();
+
+                foreach (KeyValuePair&lt;string,string&gt; tuple in installed_files)
+                {
+                    string path = KSPPathUtils.NormalizePath(tuple.Key);
+
+                    if (Path.IsPathRooted(path))
+                    {
+                        path = ksp.ToRelativeGameDir(path);
+                        normalised_installed_files[path] = tuple.Value;
+                    }
+                    else
+                    {
+                        // Already relative.
+                        normalised_installed_files[path] = tuple.Value;
+                    }
+                }
+
+                installed_files = normalised_installed_files;
+
+                // Now update all our module file manifests.
+
+                foreach (InstalledModule module in installed_modules.Values)
+                {
+                    module.Renormalise(ksp);
+                }
+
+                // Our installed dlls have contained relative paths since forever,
+                // and the next `ckan scan` will fix them anyway. (We can&#39;t scan here,
+                // because that needs a registry, and we chicken-egg.)
+
+                log.Warn(&quot;Registry upgrade complete&quot;);
+            }
+
+            // Fix control lock, which previously was indexed with an invalid identifier.
+            if (registry_version &lt; 2)
+            {
+                InstalledModule control_lock_entry;
+                const string old_ident = &quot;001ControlLock&quot;;
+                const string new_ident = &quot;ControlLock&quot;;
+
+                if (installed_modules.TryGetValue(&quot;001ControlLock&quot;, out control_lock_entry))
+                {
+                    if (ksp == null)
+                    {
+                        throw new Kraken(&quot;Internal bug: No KSP instance provided on registry deserialisation&quot;);
+                    }
+
+                    log.WarnFormat(&quot;Older registry detected. Reindexing {0} as {1}. This may take a moment.&quot;, old_ident, new_ident);
+
+                    // Remove old record.
+                    installed_modules.Remove(old_ident);
+
+                    // Extract the old module metadata
+                    Module control_lock_mod = control_lock_entry.Module;
+
+                    // Change to the correct ident.
+                    control_lock_mod.identifier = new_ident;
+
+                    // Prepare to re-index.
+                    var new_control_lock_installed = new InstalledModule(
+                        ksp,
+                        control_lock_mod,
+                        control_lock_entry.Files
+                    );
+
+                    // Re-insert into registry.
+                    installed_modules[new_control_lock_installed.identifier] = new_control_lock_installed;
+
+                    // Re-index files.
+                    ReindexInstalled();
+                }
+            }
+
+            registry_version = LATEST_REGISTRY_VERSION;
+        }
+
+        /// &lt;summary&gt;
+        /// Rebuilds our master index of installed_files.
+        /// Called on registry format updates, but safe to be triggered at any time.
+        /// &lt;/summary&gt;
+        public void ReindexInstalled()
+        {
+            installed_files = new Dictionary&lt;string, string&gt;();
+
+            foreach (InstalledModule module in installed_modules.Values)
+            {
+                foreach (string file in module.Files)
+                {
+                    // Register each file we know about as belonging to the given module.
+                    installed_files[file] = module.identifier;
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Do we what we can to repair/preen the registry.
+        /// &lt;/summary&gt;
+        public void Repair()
+        {
+            ReindexInstalled();
+        }
+
+        #endregion
+
+        #region Constructors
+
+        public Registry(
+            Dictionary&lt;string, InstalledModule&gt; installed_modules,
+            Dictionary&lt;string, string&gt; installed_dlls,
+            Dictionary&lt;string, AvailableModule&gt; available_modules,
+            Dictionary&lt;string, string&gt; installed_files,
+            SortedDictionary&lt;string, Repository&gt; repositories
+            )
+        {
+            // Is there a better way of writing constructors than this? Srsly?
+            this.installed_modules = installed_modules;
+            this.installed_dlls = installed_dlls;
+            this.available_modules = available_modules;
+            this.installed_files = installed_files;
+            this.repositories = repositories;
+            registry_version = LATEST_REGISTRY_VERSION;
+        }
+
+        // If deserialsing, we don&#39;t want everything put back directly,
+        // thus making sure our version number is preserved, letting us
+        // detect registry version upgrades.
+        [JsonConstructor]
+        private Registry()
+        {
+        }
+
+        public static Registry Empty()
+        {
+            return new Registry(
+                new Dictionary&lt;string, InstalledModule&gt;(),
+                new Dictionary&lt;string, string&gt;(),
+                new Dictionary&lt;string, AvailableModule&gt;(),
+                new Dictionary&lt;string, string&gt;(),
+                new SortedDictionary&lt;string, Repository&gt;()
+                );
+        }
+
+        #endregion
+
+        #region Transaction Handling
+
+        // We use this to record which transaction we&#39;re in.
+        private string enlisted_tx;
+
+        // This *doesn&#39;t* get called when we get enlisted in a Tx, it gets
+        // called when we&#39;re about to commit a transaction. We can *probably*
+        // get away with calling .Done() here and skipping the commit phase,
+        // but I&#39;m not sure if we&#39;d get InDoubt signalling if we did that.
+        public void Prepare(PreparingEnlistment preparingEnlistment)
+        {
+            log.Debug(&quot;Registry prepared to commit transaction&quot;);
+
+            preparingEnlistment.Prepared();
+        }
+
+        public void InDoubt(Enlistment enlistment)
+        {
+            // In doubt apparently means we don&#39;t know if we&#39;ve committed or not.
+            // Since our TxFileMgr treats this as a rollback, so do we.
+            log.Warn(&quot;Transaction involving registry in doubt.&quot;);
+            Rollback(enlistment);
+        }
+
+        public void Commit(Enlistment enlistment)
+        {
+            // Hooray! All Tx participants have signalled they&#39;re ready.
+            // So we&#39;re done, and can clear our resources.
+
+            enlisted_tx = null;
+            transaction_backup = null;
+
+            enlistment.Done();
+            log.Debug(&quot;Registry transaction committed&quot;);
+
+            // TODO: Should we save to disk at the end of a Tx?
+            // TODO: If so, we should abort if we find a save that&#39;s while a Tx is in progress?
+            //
+            // In either case, do we want the registry_manager to be Tx aware? 
+        }
+
+        public void Rollback(Enlistment enlistment)
+        {
+            log.Info(&quot;Aborted transaction, rolling back in-memory registry changes.&quot;);
+
+            // In theory, this should put everything back the way it was, overwriting whatever
+            // we had previously.
+
+            var options = new JsonSerializerSettings {ObjectCreationHandling = ObjectCreationHandling.Replace};
+
+            JsonConvert.PopulateObject(transaction_backup, this, options);
+
+            enlisted_tx = null;
+            transaction_backup = null;
+
+            enlistment.Done();
+        }
+
+        private void SaveState()
+        {
+            // Hey, you know what&#39;s a great way to back-up your own object?
+            // JSON. ;)
+            transaction_backup = JsonConvert.SerializeObject(this, Formatting.None);
+            log.Debug(&quot;State saved&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// &quot;Pardon me, but I couldn&#39;t help but overhear you&#39;re in a Transaction...&quot;
+        /// 
+        /// Adds our registry to the current transaction. This should be called whenever we
+        /// do anything which may dirty the registry.
+        /// &lt;/summary&gt;
+        // 
+        // http://wondermark.com/1k62/
+        private void SealionTransaction()
+        {
+            if (Transaction.Current != null)
+            {
+                string current_tx = Transaction.Current.TransactionInformation.LocalIdentifier;
+
+                if (enlisted_tx == null)
+                {
+                    log.Debug(&quot;Pardon me, but I couldn&#39;t help overhear you&#39;re in a transaction...&quot;);
+                    Transaction.Current.EnlistVolatile(this, EnlistmentOptions.None);
+                    SaveState();
+                    enlisted_tx = current_tx;
+                }
+                else if (enlisted_tx != current_tx)
+                {
+                    log.Error(&quot;CKAN registry does not support nested transactions.&quot;);
+                    throw new TransactionalKraken(&quot;CKAN registry does not support nested transactions.&quot;);
+                }
+
+                // If we&#39;re here, it&#39;s a transaction we&#39;re already participating in,
+                // so do nothing.
+            }
+        }
+
+        #endregion
+
+        /// &lt;summary&gt;
+        /// Clears all available modules from the registry.
+        /// &lt;/summary&gt;
+        public void ClearAvailable()
+        {
+            SealionTransaction();
+            available_modules = new Dictionary&lt;string, AvailableModule&gt;();
+        }
+
+        /// &lt;summary&gt;
+        /// Mark a given module as available.
+        /// &lt;/summary&gt;
+        public void AddAvailable(CkanModule module)
+        {
+            SealionTransaction();
+
+            // If we&#39;ve never seen this module before, create an entry for it.
+
+            if (! available_modules.ContainsKey(module.identifier))
+            {
+                log.DebugFormat(&quot;Adding new available module {0}&quot;, module.identifier);
+                available_modules[module.identifier] = new AvailableModule();
+            }
+
+            // Now register the actual version that we have.
+            // (It&#39;s okay to have multiple versions of the same mod.)
+
+            log.DebugFormat(&quot;Available: {0} version {1}&quot;, module.identifier, module.version);
+            available_modules[module.identifier].Add(module);
+        }
+
+        /// &lt;summary&gt;
+        /// Remove the given module from the registry of available modules.
+        /// Does *nothing* if the module was not present to begin with.
+        /// &lt;/summary&gt;
+        public void RemoveAvailable(string identifier, Version version)
+        {
+            AvailableModule availableModule;
+            if (available_modules.TryGetValue(identifier, out availableModule))
+            {
+                SealionTransaction();
+                availableModule.Remove(version);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Removes the given module from the registry of available modules.
+        /// Does *nothing* if the module was not present to begin with.&lt;/summary&gt;
+        public void RemoveAvailable(Module module)
+        {
+            RemoveAvailable(module.identifier, module.version);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns a simple array of all latest available modules for
+        /// the specified version of KSP (installed version by default)
+        /// &lt;/summary&gt;
+        // TODO: This name is misleading. It&#39;s more a LatestAvailable&#39;s&#39;
+        public List&lt;CkanModule&gt; Available(KSPVersion ksp_version)
+        {            
+            var candidates = new List&lt;string&gt;(available_modules.Keys);
+            var compatible = new List&lt;CkanModule&gt;();
+
+            // It&#39;s nice to see things in alphabetical order, so sort our keys first.
+            candidates.Sort();
+
+            //Cache 
+            AvailableModule[] modules_for_current_version = available_modules.Values.Where(pair =&gt; pair.Latest(ksp_version) != null).ToArray();
+            // Now find what we can give our user.
+            foreach (string candidate in candidates)
+            {
+                CkanModule available = LatestAvailable(candidate, ksp_version);
+
+                if (available != null)
+                {
+                    // we need to check that we can get everything we depend on
+                    bool failedDepedency = false;
+
+                    if (available.depends != null)
+                    {
+                        foreach (RelationshipDescriptor dependency in available.depends)
+                        {
+                            try
+                            {
+                                if (LatestAvailableWithProvides(dependency.name, ksp_version, modules_for_current_version).Count == 0)
+                                {
+                                    failedDepedency = true;
+                                    break;
+                                }
+                            }
+                            catch (KeyNotFoundException e)
+                            {
+                                log.ErrorFormat(&quot;Cannot find available version with provides for {0} in registry&quot;, dependency.name);
+                                throw e;
+                            }
+                            catch (ModuleNotFoundKraken)
+                            {
+                                failedDepedency = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!failedDepedency)
+                    {
+                        compatible.Add(available);
+                    }
+                }
+            }
+
+            return compatible;
+        }
+
+        /// &lt;summary&gt;
+        ///     Returns a simple array of all incompatible modules for
+        ///     the specified version of KSP (installed version by default)
+        /// &lt;/summary&gt;
+        public List&lt;CkanModule&gt; Incompatible(KSPVersion ksp_version)
+        {           
+            var candidates = new List&lt;string&gt;(available_modules.Keys);
+            var incompatible = new List&lt;CkanModule&gt;();
+
+            // It&#39;s nice to see things in alphabetical order, so sort our keys first.
+            candidates.Sort();
+
+            // Now find what we can give our user.
+            foreach (string candidate in candidates)
+            {
+                CkanModule available = LatestAvailable(candidate, ksp_version);
+
+                if (available == null)
+                {
+                    incompatible.Add(LatestAvailable(candidate, null));
+                }
+            }
+
+            return incompatible;
+        }
+        
+
+        /// &lt;summary&gt;
+        ///     Returns the latest available version of a module that
+        ///     satisifes the specified version.
+        ///     Throws a ModuleNotFoundException if asked for a non-existant module.
+        ///     Returns null if there&#39;s simply no compatible version for this system.
+        ///     If no ksp_version is provided, the latest module for *any* KSP is returned.
+        /// &lt;/summary&gt;
+         
+        // TODO: Consider making this internal, because practically everything should
+        // be calling LatestAvailableWithProvides()
+        public CkanModule LatestAvailable(string module, KSPVersion ksp_version)
+        {
+            log.DebugFormat(&quot;Finding latest available for {0}&quot;, module);
+
+            // TODO: Check user&#39;s stability tolerance (stable, unstable, testing, etc)
+
+            try
+            {
+                return available_modules[module].Latest(ksp_version);
+            }
+            catch (KeyNotFoundException)
+            {
+                throw new ModuleNotFoundKraken(module);
+            }
+        }
+
+        /// &lt;summary&gt;
+        ///     Returns the latest available version of a module that
+        ///     satisifes the specified version. Takes into account module &#39;provides&#39;,
+        ///     which may result in a list of alternatives being provided.
+        ///     Returns an empty list if nothing is available for our system, which includes if no such module exists.
+        ///     If no KSP version is provided, the latest module for *any* KSP version is given.
+        /// &lt;/summary&gt;
+        public List&lt;CkanModule&gt; LatestAvailableWithProvides(string module, KSPVersion ksp_version)
+        {
+            // This public interface calcultes a cache of modules which
+            // are compatible with the current version of KSP, and then
+            // calls the private version below for heavy lifting.
+            return LatestAvailableWithProvides(module, ksp_version,
+                available_modules.Values.Where(pair =&gt; pair.Latest(ksp_version) != null));
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the latest version of a module that can be installed for
+        /// the given KSP version. This is a *private* method that assumes
+        /// the `available_for_current_version` list has been correctly
+        /// calculated. Not for direct public consumption. ;)
+        /// &lt;/summary&gt;
+        private List&lt;CkanModule&gt; LatestAvailableWithProvides(string module, KSPVersion ksp_version,
+            IEnumerable&lt;AvailableModule&gt; available_for_current_version)
+        {
+            log.DebugFormat(&quot;Finding latest available with provides for {0}&quot;, module);
+
+            // TODO: Check user&#39;s stability tolerance (stable, unstable, testing, etc)
+
+            var modules = new List&lt;CkanModule&gt;();
+
+            try
+            {
+                // If we can find the module requested for our KSP, use that.
+                CkanModule mod = LatestAvailable(module, ksp_version);
+                if (mod != null)
+                {
+                    modules.Add(mod);
+                }
+            }
+            catch (ModuleNotFoundKraken)
+            {
+                // It&#39;s cool if we can&#39;t find it, though.
+            }
+
+            // Walk through all our available modules, and see if anything
+            // provides what we need.
+
+            foreach (AvailableModule available_module in available_for_current_version)
+            {
+                // Get our candidate module. We can assume this is non-null, as
+                // if it *is* null then available_for_current_version is corrupted,
+                // and something is terribly wrong.
+                CkanModule candidate = available_module.Latest(ksp_version);
+
+                // Find everything this module provides (for our version of KSP)
+                List&lt;string&gt; provides = candidate.provides;
+
+                // If the module has provides, and any of them are what we&#39;re looking
+                // for, the add it to our list.
+                if (provides != null &amp;&amp; provides.Any(provided =&gt; provided == module))
+                {
+                    modules.Add(candidate);
+                }
+            }
+            return modules;
+        }
+
+
+        public CkanModule GetModuleByVersion(string ident, string version)
+        {
+            return GetModuleByVersion(ident, new Version(version));
+        }
+
+        public CkanModule GetModuleByVersion(string ident, Version version)
+        {
+            log.DebugFormat(&quot;Trying to find {0} version {1}&quot;, ident, version);
+
+            if (!available_modules.ContainsKey(ident))
+            {
+                return null;
+            }
+
+            AvailableModule available = available_modules[ident];
+
+            return available.ByVersion(version);
+        }
+
+        /// &lt;summary&gt;
+        ///     Register the supplied module as having been installed, thereby keeping
+        ///     track of its metadata and files.
+        /// &lt;/summary&gt;
+        public void RegisterModule(Module mod, IEnumerable&lt;string&gt; absolute_files, KSP ksp)
+        {
+            SealionTransaction();
+
+            // But we also want to keep track of all its files.
+            // We start by checking to see if any files are owned by another mod,
+            // if so, we abort with a list of errors.
+
+            var inconsistencies = new List&lt;string&gt;();
+
+            // We always work with relative files, so let&#39;s get some!
+            IEnumerable&lt;string&gt; relative_files = absolute_files.Select(x =&gt; ksp.ToRelativeGameDir(x));
+
+            // For now, it&#39;s always cool if a module wants to register a directory.
+            // We have to flip back to absolute paths to actually test this.
+            foreach (string file in relative_files.Where(file =&gt; !Directory.Exists(ksp.ToAbsoluteGameDir(file))))
+            {
+                string owner;
+                if (installed_files.TryGetValue(file, out owner))
+                {
+                    // Woah! Registering an already owned file? Not cool!
+                    // (Although if it existed, we should have thrown a kraken well before this.)                    
+                    inconsistencies.Add(
+                        string.Format(&quot;{0} wishes to install {1}, but this file is registered to {2}&quot;,
+                            mod.identifier, file, owner
+                            ));
+                }
+            }
+
+            if (inconsistencies.Count &gt; 0)
+            {
+                throw new InconsistentKraken(inconsistencies);
+            }
+
+            // If everything is fine, then we copy our files across. By not doing this
+            // in the loop above, we make sure we don&#39;t have a half-registered module
+            // when we throw our exceptinon.
+
+            // This *will* result in us overwriting who owns a directory, and that&#39;s cool,
+            // directories aren&#39;t really owned like files are. However because each mod maintains
+            // its own list of files, we&#39;ll remove directories when the last mod using them
+            // is uninstalled.
+            foreach (string file in relative_files)
+            {
+                installed_files[file] = mod.identifier;
+            }
+
+            // Finally, register our module proper.
+            var installed = new InstalledModule(ksp, mod, relative_files);
+            installed_modules.Add(mod.identifier, installed);
+        }
+
+        /// &lt;summary&gt;
+        /// Deregister a module, which must already have its files removed, thereby
+        /// forgetting abouts its metadata and files.
+        /// 
+        /// Throws an InconsistentKraken if not all files have been removed.
+        /// &lt;/summary&gt;
+        public void DeregisterModule(KSP ksp, string module)
+        {
+            SealionTransaction();
+
+            var inconsistencies = new List&lt;string&gt;();
+
+            var absolute_files = installed_modules[module].Files.Select(ksp.ToAbsoluteGameDir);
+            // Note, this checks to see if a *file* exists; it doesn&#39;t
+            // trigger on directories, which we allow to still be present
+            // (they may be shared by multiple mods.
+                
+            foreach (var absolute_file in absolute_files.Where(File.Exists))
+            {
+                inconsistencies.Add(string.Format(
+                    &quot;{0} is registered to {1} but has not been removed!&quot;,
+                    absolute_file, module));
+            }
+
+            if (inconsistencies.Count &gt; 0)
+            {
+                // Uh oh, what mess have we got ourselves into now, Inconsistency Kraken?
+                throw new InconsistentKraken(inconsistencies);
+            }
+
+            // Okay, all the files are gone. Let&#39;s clear our metadata.
+            foreach (string rel_file in installed_modules[module].Files)
+            {
+                installed_files.Remove(rel_file);
+            }
+
+            // Bye bye, module, it&#39;s been nice having you visit.
+            installed_modules.Remove(module);
+        }
+
+        /// &lt;summary&gt;
+        /// Registers the given DLL as having been installed. This provides some support
+        /// for pre-CKAN modules.
+        /// 
+        /// Does nothing if the DLL is already part of an installed module.
+        /// &lt;/summary&gt;
+        public void RegisterDll(KSP ksp, string absolute_path)
+        {
+            SealionTransaction();
+
+            string relative_path = ksp.ToRelativeGameDir(absolute_path);
+
+            string owner;
+            if (installed_files.TryGetValue(relative_path, out owner))
+            {
+                log.InfoFormat(
+                    &quot;Not registering {0}, it belongs to {1}&quot;,
+                    relative_path,
+                    owner
+                );
+                return;
+            }
+                
+            // http://xkcd.com/208/
+            // This regex works great for things like GameData/Foo/Foo-1.2.dll
+            Match match = Regex.Match(
+                relative_path, @&quot;
+                    ^GameData/            # DLLs only live in GameData
+                    (?:.*/)?              # Intermediate paths (ending with /)
+                    (?&lt;modname&gt;[^.]+)     # Our DLL name, up until the first dot.
+                    .*\.dll$              # Everything else, ending in dll
+                &quot;,
+                RegexOptions.IgnoreCase | RegexOptions.IgnorePatternWhitespace
+            );
+
+            string modName = match.Groups[&quot;modname&quot;].Value;
+
+            if (modName.Length == 0)
+            {
+                log.WarnFormat(&quot;Attempted to index {0} which is not a DLL&quot;, relative_path);
+                return;
+            }
+
+            log.InfoFormat(&quot;Registering {0} from {1}&quot;, modName, relative_path);
+
+            // We&#39;re fine if we overwrite an existing key.
+            installed_dlls[modName] = relative_path;
+        }
+
+        /// &lt;summary&gt;
+        /// Clears knowledge of all DLLs from the registry.
+        /// &lt;/summary&gt;
+        public void ClearDlls()
+        {
+            SealionTransaction();
+            installed_dlls = new Dictionary&lt;string, string&gt;();
+        }
+
+        /// &lt;summary&gt;
+        /// Returns a dictionary of all modules installed, along with their
+        /// versions.
+        /// This includes DLLs, which will have a version type of `DllVersion`.
+        /// This includes Provides, which will have a version of `ProvidesVersion`.
+        /// &lt;/summary&gt;
+        public Dictionary&lt;string, Version&gt; Installed(bool withProvides = true)
+        {
+            var installed = new Dictionary&lt;string, Version&gt;();
+
+            // Index our DLLs, as much as we dislike them.
+            foreach (var dllinfo in installed_dlls)
+            {
+                installed[dllinfo.Key] = new DllVersion();
+            }
+
+            // Index our provides list, so users can see virtual packages
+            if (withProvides)
+            {
+                foreach (var provided in Provided())
+                {
+                    installed[provided.Key] = provided.Value;
+                }
+            }
+
+            // Index our installed modules (which may overwrite the installed DLLs and provides)
+            foreach (var modinfo in installed_modules)
+            {
+                installed[modinfo.Key] = modinfo.Value.Module.version;
+            }
+
+            return installed;
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the InstalledModule, or null if it is not installed.
+        /// Does *not* look up virtual modules.
+        /// &lt;/summary&gt;
+        public InstalledModule InstalledModule(string module)
+        {
+            // In theory, someone could then modify the data they get back from
+            // this, so we sea-lion just in case.
+
+            SealionTransaction();
+
+            InstalledModule installedModule;
+            return installed_modules.TryGetValue(module, out installedModule) ? installedModule : null;
+        }
+            
+        /// &lt;summary&gt;
+        /// Returns a dictionary of provided (virtual) modules, and a
+        /// ProvidesVersion indicating what provides them.
+        /// &lt;/summary&gt;
+
+        // TODO: In the future it would be nice to cache this list, and mark it for rebuild
+        // if our installed modules change.
+        internal Dictionary&lt;string, ProvidesVersion&gt; Provided()
+        {
+            var installed = new Dictionary&lt;string, ProvidesVersion&gt;();
+
+            foreach (var modinfo in installed_modules)
+            {
+                Module module = modinfo.Value.Module;
+
+                // Skip if this module provides nothing.
+                if (module.provides == null)
+                {
+                    continue;
+                }
+
+                foreach (string provided in module.provides)
+                {
+                    installed[provided] = new ProvidesVersion(module.identifier);
+                }
+            }
+
+            return installed;
+        }
+
+        /// &lt;summary&gt;
+        ///     Returns the installed version of a given mod.
+        ///     If the mod was autodetected (but present), a version of type `DllVersion` is returned.
+        ///     If the mod is provided by another mod (ie, virtual) a type of ProvidesVersion is returned.
+        ///     If the mod is not found, a null will be returned.
+        /// &lt;/summary&gt;
+        public Version InstalledVersion(string modIdentifier)
+        {
+            InstalledModule installedModule;
+            if (installed_modules.TryGetValue(modIdentifier, out installedModule))
+            {
+                return installedModule.Module.version;
+            }
+            if (installed_dlls.ContainsKey(modIdentifier))
+            {
+                return new DllVersion();
+            }
+
+            var provided = Provided();
+
+            ProvidesVersion version;
+            return provided.TryGetValue(modIdentifier, out version) ? version : null;
+        }
+
+        /// &lt;summary&gt;
+        ///     Check if a mod is installed (either via CKAN, DLL, or virtually)
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;&lt;c&gt;true&lt;/c&gt;, if installed&lt;c&gt;false&lt;/c&gt; otherwise.&lt;/returns&gt;
+        public bool IsInstalled(string modName)
+        {
+            if (InstalledVersion(modName) == null)
+            {
+                return false;
+            }
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        ///     Check if a mod is autodetected.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;&lt;c&gt;true&lt;/c&gt;, if autodetected&lt;c&gt;false&lt;/c&gt; otherwise.&lt;/returns&gt;
+        public bool IsAutodetected(string identifier)
+        {            
+            return IsInstalled(identifier) &amp;&amp; InstalledVersion(identifier).ToString().Equals(&quot;autodetected dll&quot;);
+        }
+
+        public bool HasUpdate(string identifier, KSPVersion version)
+        {
+            CkanModule newestVersion;
+            try
+            {
+                newestVersion = LatestAvailable(identifier, version);
+            }
+            catch (ModuleNotFoundKraken)
+            {
+                return false;
+            }
+            if (newestVersion == null) return false;
+            return IsInstalled(identifier) &amp;&amp; newestVersion.version.IsGreaterThan(InstalledVersion(identifier));
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the module which owns this file, or null if not known.
+        /// Throws a PathErrorKraken if an absolute path is provided.
+        /// &lt;/summary&gt;
+        public string FileOwner(string file)
+        {
+            file = KSPPathUtils.NormalizePath(file);
+
+            if (Path.IsPathRooted(file))
+            {
+                throw new PathErrorKraken(
+                    file,
+                    &quot;KSPUtils.FileOwner can only work with relative paths.&quot;
+                );
+            }
+
+            string fileOwner;
+            return installed_files.TryGetValue(file, out fileOwner) ? fileOwner : null;
+        }
+
+        /// &lt;summary&gt;
+        ///     Checks the sanity of the registry, to ensure that all dependencies are met,
+        ///     and no mods conflict with each other. Throws an InconsistentKraken on failure.
+        /// &lt;/summary&gt;
+        public void CheckSanity()
+        {
+            IEnumerable&lt;Module&gt; installed = from pair in installed_modules select pair.Value.Module;
+            SanityChecker.EnforceConsistency(installed, installed_dlls.Keys);
+        }
+
+        /// &lt;summary&gt;
+        /// Finds and returns all modules that could not exist without the listed modules installed, including themselves.
+        /// Acts recursively.
+        /// &lt;/summary&gt;
+        public static HashSet&lt;string&gt; FindReverseDependencies(IEnumerable&lt;string&gt; modules_to_remove, IEnumerable&lt;Module&gt; orig_installed, IEnumerable&lt;string&gt; dlls)
+        {
+            while (true)
+            {
+                // Make our hypothetical install, and remove the listed modules from it.
+                HashSet&lt;Module&gt; hypothetical = new HashSet&lt;Module&gt;(orig_installed); // Clone because we alter hypothetical.
+                hypothetical.RemoveWhere(mod =&gt; modules_to_remove.Contains(mod.identifier));
+
+                log.DebugFormat(&quot;Started with {0}, removing {1}, and keeping {2}; our dlls are {3}&quot;, string.Join(&quot;, &quot;, orig_installed), string.Join(&quot;, &quot;, modules_to_remove), string.Join(&quot;, &quot;, hypothetical), string.Join(&quot;, &quot;, dlls));
+
+                // Find what would break with this configuration.
+                // The Values.SelectMany() flattens our list of broken mods.
+                var broken = new HashSet&lt;string&gt;(SanityChecker.FindUnmetDependencies(hypothetical, dlls)
+                    .Values.SelectMany(x =&gt; x).Select(x =&gt; x.identifier));
+
+                // If nothing else would break, it&#39;s just the list of modules we&#39;re removing.
+                HashSet&lt;string&gt; to_remove = new HashSet&lt;string&gt;(modules_to_remove);
+                
+                if (to_remove.IsSupersetOf(broken))
+                {
+                    log.DebugFormat(&quot;{0} is a superset of {1}, work done&quot;, string.Join(&quot;, &quot;, to_remove), string.Join(&quot;, &quot;, broken));
+                    return to_remove;
+                }
+
+                // Otherwise, remove our broken modules as well, and recurse.
+                broken.UnionWith(to_remove);
+                modules_to_remove = broken;
+            }
+        }
+
+        public HashSet&lt;string&gt; FindReverseDependencies(IEnumerable&lt;string&gt; modules_to_remove)
+        {
+            var installed = new HashSet&lt;Module&gt;(installed_modules.Values.Select(x =&gt; x.Module));
+            return FindReverseDependencies(modules_to_remove, installed, new HashSet&lt;string&gt;(installed_dlls.Keys));
+        }
+
+        /// &lt;summary&gt;
+        /// Finds and returns all modules that could not exist without the given module installed
+        /// &lt;/summary&gt;
+        public HashSet&lt;string&gt; FindReverseDependencies(string module)
+        {
+            var set = new HashSet&lt;string&gt; {module};
+            return FindReverseDependencies(set);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[81,13,81,14,0],[82,17,82,96,0],[83,17,83,36,0],[84,13,84,14,0],[89,13,89,14,0],[90,17,90,82,0],[92,17,92,82,0],[94,17,94,24,0],[94,63,94,78,0],[94,26,94,59,0],[95,17,95,18,0],[96,21,96,73,0],[98,21,98,49,0],[99,21,99,22,0],[100,25,100,60,0],[101,25,101,72,0],[102,21,102,22,0],[104,21,104,22,0],[106,25,106,72,0],[107,21,107,22,0],[108,17,108,18,0],[94,60,94,62,0],[110,17,110,62,0],[114,17,114,24,0],[114,52,114,76,0],[114,26,114,48,0],[115,17,115,18,0],[116,21,116,45,0],[117,17,117,18,0],[114,49,114,51,0],[123,17,123,55,0],[124,13,124,14,0],[134,17,134,18,0],[135,21,135,37,0],[136,21,136,22,0],[137,25,137,112,0],[140,21,140,133,0],[143,21,143,57,0],[146,21,146,73,0],[149,21,149,61,0],[152,21,156,23,0],[159,21,159,107,0],[162,21,162,40,0],[163,17,163,18,0],[174,9,174,10,0],[175,13,175,64,0],[177,13,177,20,0],[177,48,177,72,0],[177,22,177,44,0],[178,13,178,14,0],[179,17,179,24,0],[179,41,179,53,0],[179,26,179,37,0],[180,17,180,18,0],[182,21,182,63,0],[183,17,183,18,0],[179,38,179,40,0],[184,13,184,14,0],[177,45,177,47,0],[185,9,185,10,0],[191,9,191,10,0],[192,13,192,32,0],[193,9,193,10,0],[254,9,254,10,0],[257,13,257,66,0],[258,13,258,34,0],[259,9,259,10,0],[416,21,416,22,0],[417,25,417,32,0],[417,71,417,88,0],[417,34,417,67,0],[418,25,418,26,0],[420,29,420,30,0],[421,33,421,135,0],[422,33,422,34,0],[423,37,423,60,0],[424,37,424,43,0],[426,29,426,30,0],[427,29,427,59,0],[428,29,428,30,0],[429,33,429,133,0],[430,33,430,41,0],[432,29,432,57,0],[433,29,433,30,0],[434,33,434,56,0],[435,33,435,39,0],[437,25,437,26,0],[417,68,417,70,0],[438,21,438,22,0],[455,9,455,10,0],[456,13,456,71,0],[457,13,457,55,0],[460,13,460,31,0],[463,13,463,20,0],[463,42,463,52,0],[463,22,463,38,0],[464,13,464,14,0],[465,17,465,80,0],[467,17,467,39,0],[468,17,468,18,0],[469,21,469,72,0],[470,17,470,18,0],[471,13,471,14,0],[463,39,463,41,0],[473,13,473,33,0],[474,9,474,10,0],[573,9,573,10,0],[574,13,574,68,0],[575,9,575,10,0],[578,9,578,10,0],[579,13,579,79,0],[581,13,581,55,0],[582,13,582,14,0],[583,17,583,29,0],[586,13,586,66,0],[588,13,588,49,0],[589,9,589,10,0],[614,17,614,18,0],[617,21,620,32,0],[621,17,621,18,0],[625,13,625,14,0],[626,17,626,63,0],[664,22,664,39,0],[665,13,665,14,0],[666,17,668,45,0],[669,13,669,14,0],[672,13,672,14,0],[674,17,674,63,0],[701,13,701,14,0],[702,17,706,19,0],[707,17,707,24,0],[725,13,725,14,0],[726,17,726,92,0],[727,17,727,24,0],[764,26,764,38,0],[765,17,765,18,0],[766,21,766,62,0],[767,17,767,18,0],[815,17,815,24,0],[815,45,815,60,0],[815,26,815,41,0],[816,17,816,18,0],[817,21,817,82,0],[818,17,818,18,0],[815,42,815,44,0],[819,13,819,14,0],[877,13,877,41,0],[878,13,878,14,0],[879,17,879,30,0],[890,9,890,10,0],[891,13,891,53,0],[893,13,893,41,0],[894,13,894,14,0],[895,17,898,19,0],[902,13,902,88,0],[903,9,903,10,0],[959,9,959,10,0],[960,13,960,52,0],[961,13,961,49,0],[962,9,962,10,0],[46,17,46,18,1],[46,19,46,44,1],[46,45,46,46,1],[49,17,49,18,1],[49,19,49,45,1],[49,46,49,47,1],[57,17,57,18,1],[57,19,57,51,1],[57,52,57,53,1],[65,17,65,18,1],[65,19,65,46,1],[65,47,65,48,1],[72,9,72,10,1],[74,13,74,45,1],[80,13,80,41,1],[88,13,88,39,1],[127,13,127,38,1],[128,13,128,14,1],[133,17,133,93,1],[164,13,164,14,1],[166,13,166,56,1],[167,9,167,10,1],[199,9,205,14,1],[206,9,206,10,1],[208,13,208,56,1],[209,13,209,50,1],[210,13,210,56,1],[211,13,211,52,1],[212,13,212,46,1],[213,13,213,56,1],[214,9,214,10,1],[220,9,220,27,1],[221,9,221,10,1],[222,9,222,10,1],[225,9,225,10,1],[226,13,232,19,1],[233,9,233,10,1],[247,9,247,10,1],[248,13,248,66,1],[250,13,250,44,1],[251,9,251,10,1],[262,9,262,10,1],[266,13,266,32,1],[267,13,267,39,1],[269,13,269,31,1],[270,13,270,57,1],[276,9,276,10,1],[279,9,279,10,1],[280,13,280,87,1],[285,13,285,112,1],[287,13,287,75,1],[289,13,289,32,1],[290,13,290,39,1],[292,13,292,31,1],[293,9,293,10,1],[296,9,296,10,1],[299,13,299,85,1],[300,13,300,38,1],[301,9,301,10,1],[312,9,312,10,1],[313,13,313,45,1],[314,13,314,14,1],[315,17,315,96,1],[317,17,317,41,1],[318,17,318,18,1],[319,21,319,101,1],[320,21,320,86,1],[321,21,321,33,1],[322,21,322,46,1],[323,17,323,18,1],[324,22,324,52,1],[325,17,325,18,1],[326,21,326,86,1],[327,21,327,106,1],[332,13,332,14,1],[333,9,333,10,1],[341,9,341,10,1],[342,13,342,34,1],[343,13,343,75,1],[344,9,344,10,1],[350,9,350,10,1],[351,13,351,34,1],[355,13,355,68,1],[356,13,356,14,1],[357,17,357,87,1],[358,17,358,78,1],[359,13,359,14,1],[364,13,364,94,1],[365,13,365,62,1],[366,9,366,10,1],[373,9,373,10,1],[375,13,375,80,1],[376,13,376,14,1],[377,17,377,38,1],[378,17,378,49,1],[379,13,379,14,1],[380,9,380,10,1],[386,9,386,10,1],[387,13,387,64,1],[388,9,388,10,1],[396,9,396,10,1],[397,13,397,71,1],[398,13,398,53,1],[401,13,401,31,1],[404,13,404,100,1],[404,132,404,144,1],[406,13,406,20,1],[406,42,406,52,1],[406,22,406,38,1],[407,13,407,14,1],[408,17,408,80,1],[410,17,410,39,1],[411,17,411,18,1],[413,21,413,50,1],[415,21,415,51,1],[440,21,440,42,1],[441,21,441,22,1],[442,25,442,51,1],[443,21,443,22,1],[444,17,444,18,1],[445,13,445,14,1],[406,39,406,41,1],[447,13,447,31,1],[448,9,448,10,1],[488,9,488,10,1],[489,13,489,73,1],[494,13,494,14,1],[495,17,495,70,1],[497,13,497,41,1],[498,13,498,14,1],[499,17,499,56,1],[501,9,501,10,1],[511,9,511,10,1],[515,13,516,56,1],[516,88,516,91,1],[517,9,517,10,1],[527,9,527,10,1],[528,13,528,87,1],[532,13,532,50,1],[535,13,535,14,1],[537,17,537,71,1],[538,17,538,33,1],[539,17,539,18,1],[540,21,540,38,1],[541,17,541,18,1],[542,13,542,14,1],[543,13,543,41,1],[544,13,544,14,1],[546,13,546,14,1],[551,13,551,20,1],[551,58,551,87,1],[551,22,551,54,1],[552,13,552,14,1],[556,17,556,77,1],[559,17,559,60,1],[563,17,563,66,1],[563,84,563,86,1],[564,17,564,18,1],[565,21,565,44,1],[566,17,566,18,1],[567,13,567,14,1],[551,55,551,57,1],[568,13,568,28,1],[569,9,569,10,1],[596,9,596,10,1],[597,13,597,34,1],[603,13,603,54,1],[606,13,606,77,1],[606,101,606,103,1],[610,13,610,20,1],[610,37,610,66,1],[610,112,610,113,1],[610,22,610,33,1],[611,13,611,14,1],[613,17,613,66,1],[622,13,622,14,1],[610,34,610,36,1],[624,13,624,43,1],[637,13,637,20,1],[637,37,637,51,1],[637,22,637,33,1],[638,13,638,14,1],[639,17,639,56,1],[640,13,640,14,1],[637,34,637,36,1],[643,13,643,75,1],[644,13,644,62,1],[645,9,645,10,1],[654,9,654,10,1],[655,13,655,34,1],[657,13,657,54,1],[659,13,659,96,1],[664,13,664,20,1],[664,43,664,76,1],[664,40,664,42,1],[671,13,671,43,1],[678,13,678,20,1],[678,41,678,72,1],[678,22,678,37,1],[679,13,679,14,1],[680,17,680,50,1],[681,13,681,14,1],[678,38,678,40,1],[684,13,684,46,1],[685,9,685,10,1],[694,9,694,10,1],[695,13,695,34,1],[697,13,697,73,1],[700,13,700,71,1],[712,13,720,15,1],[722,13,722,60,1],[724,13,724,37,1],[730,13,730,80,1],[733,13,733,53,1],[734,9,734,10,1],[740,9,740,10,1],[741,13,741,34,1],[742,13,742,63,1],[743,9,743,10,1],[752,9,752,10,1],[753,13,753,63,1],[756,13,756,20,1],[756,37,756,51,1],[756,22,756,33,1],[757,13,757,14,1],[758,17,758,59,1],[759,13,759,14,1],[756,34,756,36,1],[762,13,762,30,1],[763,13,763,14,1],[764,17,764,24,1],[764,42,764,52,1],[764,39,764,41,1],[768,13,768,14,1],[771,13,771,20,1],[771,37,771,54,1],[771,22,771,33,1],[772,13,772,14,1],[773,17,773,71,1],[774,13,774,14,1],[771,34,771,36,1],[776,13,776,30,1],[777,9,777,10,1],[784,9,784,10,1],[788,13,788,34,1],[791,13,791,104,1],[792,9,792,10,1],[802,9,802,10,1],[803,13,803,71,1],[805,13,805,20,1],[805,37,805,54,1],[805,22,805,33,1],[806,13,806,14,1],[807,17,807,54,1],[810,17,810,45,1],[811,17,811,18,1],[812,21,812,30,1],[805,34,805,36,1],[821,13,821,30,1],[822,9,822,10,1],[831,9,831,10,1],[833,13,833,83,1],[834,13,834,14,1],[835,17,835,55,1],[837,13,837,59,1],[838,13,838,14,1],[839,17,839,41,1],[842,13,842,39,1],[845,13,845,86,1],[846,9,846,10,1],[853,9,853,10,1],[854,13,854,51,1],[855,13,855,14,1],[856,17,856,30,1],[858,13,858,25,1],[859,9,859,10,1],[866,9,866,10,1],[867,13,867,114,1],[868,9,868,10,1],[871,9,871,10,1],[874,13,874,14,1],[875,17,875,70,1],[876,13,876,14,1],[881,13,881,39,1],[881,40,881,53,1],[882,13,882,113,1],[883,9,883,10,1],[910,9,910,10,1],[911,13,911,83,1],[911,100,911,101,1],[912,13,912,78,1],[913,9,913,10,1],[920,9,920,10,1],[922,13,922,14,1],[924,17,924,84,1],[925,17,925,49,1],[925,91,925,93,1],[927,17,927,233,1],[931,17,932,45,1],[932,46,932,60,1],[932,72,932,75,1],[935,17,935,84,1],[937,17,937,52,1],[938,17,938,18,1],[939,21,939,133,1],[940,21,940,38,1],[944,17,944,45,1],[945,17,945,44,1],[946,13,946,14,1],[921,13,921,25,1],[947,9,947,10,1],[950,9,950,10,1],[951,13,951,86,1],[951,94,951,97,1],[952,13,952,116,1],[953,9,953,10,1],[25,22,25,97,1],[404,100,404,132,1],[516,56,516,88,1],[563,66,563,84,1],[606,77,606,101,1],[610,66,610,112,1],[911,83,911,100,1],[932,45,932,46,1],[932,60,932,72,1],[951,86,951,94,1],[925,49,925,91,1]]);
+    </script>
+  </body>
+</html>

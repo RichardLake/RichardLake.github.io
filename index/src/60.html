@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\maininstall.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Linq;
+using System.Threading;
+using System.Windows.Forms;
+
+namespace CKAN
+{
+    public partial class Main
+    {
+        private BackgroundWorker m_InstallWorker;
+
+
+        // used to signal the install worker that the user canceled the install process
+        // this may happen on the recommended/suggested mods dialogs
+        private volatile bool installCanceled;
+
+        // this will be the final list of mods we want to install 
+        private HashSet&lt;string&gt; toInstall = new HashSet&lt;string&gt;();
+
+        private void InstallMods(object sender, DoWorkEventArgs e) // this probably needs to be refactored
+        {
+            installCanceled = false;
+
+            ClearLog();
+
+            var opts =
+                (KeyValuePair&lt;List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;, RelationshipResolverOptions&gt;) e.Argument;
+
+            ModuleInstaller installer = ModuleInstaller.GetInstance(CurrentInstance, GUI.user);
+            // setup progress callback        
+
+            toInstall = new HashSet&lt;string&gt;();
+            var toUninstall = new HashSet&lt;string&gt;();
+            var toUpgrade = new HashSet&lt;string&gt;();
+
+            // First compose sets of what the user wants installed, upgraded, and removed.
+            foreach (KeyValuePair&lt;CkanModule, GUIModChangeType&gt; change in opts.Key)
+            {
+                switch (change.Value)
+                {
+                    case GUIModChangeType.Remove:
+                        toUninstall.Add(change.Key.identifier);
+                        break;
+                    case GUIModChangeType.Update:
+                        toUpgrade.Add(change.Key.identifier);
+                        break;
+                    case GUIModChangeType.Install:
+                        toInstall.Add(change.Key.identifier);
+                        break;
+                }
+            }
+
+            // Now work on satisifying dependencies.
+
+            var recommended = new Dictionary&lt;string, List&lt;string&gt;&gt;();
+            var suggested = new Dictionary&lt;string, List&lt;string&gt;&gt;();
+
+            foreach (var change in opts.Key)
+            {
+                if (change.Value == GUIModChangeType.Install)
+                {
+                    if (change.Key.recommends != null)
+                    {
+                        foreach (RelationshipDescriptor mod in change.Key.recommends)
+                        {
+                            try
+                            {
+                                // if the mod is available for the current KSP version _and_
+                                // the mod is not installed _and_
+                                // the mod is not already in the install list
+                                if (
+                                    RegistryManager.Instance(manager.CurrentInstance)
+                                        .registry.LatestAvailable(mod.name, manager.CurrentInstance.Version()) !=
+                                    null &amp;&amp;
+                                    !RegistryManager.Instance(manager.CurrentInstance)
+                                        .registry.IsInstalled(mod.name) &amp;&amp;
+                                    !toInstall.Contains(mod.name))
+                                {
+                                    // add it to the list of recommended mods we display to the user
+                                    if (recommended.ContainsKey(mod.name))
+                                    {
+                                        recommended[mod.name].Add(change.Key.identifier);
+                                    }
+                                    else
+                                    {
+                                        recommended.Add(mod.name, new List&lt;string&gt; {change.Key.identifier});
+                                    }
+                                }
+                            }
+                                // XXX - Don&#39;t ignore all krakens! Those things are important!
+                            catch (Kraken)
+                            {
+                            }
+                        }
+                    }
+
+                    if (change.Key.suggests != null)
+                    {
+                        foreach (RelationshipDescriptor mod in change.Key.suggests)
+                        {
+                            try
+                            {
+                                if (
+                                    RegistryManager.Instance(manager.CurrentInstance).registry.LatestAvailable(mod.name, manager.CurrentInstance.Version()) != null &amp;&amp;
+                                    !RegistryManager.Instance(manager.CurrentInstance).registry.IsInstalled(mod.name) &amp;&amp;
+                                    !toInstall.Contains(mod.name))
+                                {
+                                    if (suggested.ContainsKey(mod.name))
+                                    {
+                                        suggested[mod.name].Add(change.Key.identifier);
+                                    }
+                                    else
+                                    {
+                                        suggested.Add(mod.name, new List&lt;string&gt; {change.Key.identifier});
+                                    }
+                                }
+                            }
+                                // XXX - Don&#39;t ignore all krakens! Those things are important!
+                            catch (Kraken)
+                            {
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If we&#39;re going to install something anyway, then don&#39;t list it in the
+            // recommended list, since they can&#39;t de-select it anyway.
+            foreach (var item in toInstall)
+            {
+                recommended.Remove(item);
+            }
+
+            // If there are any mods that would be recommended, prompt the user to make
+            // selections.
+            if (recommended.Any())
+            {
+                Util.Invoke(this, () =&gt; UpdateRecommendedDialog(recommended));
+
+                m_TabController.ShowTab(&quot;ChooseRecommendedModsTabPage&quot;, 3);
+                m_TabController.RenameTab(&quot;ChooseRecommendedModsTabPage&quot;, &quot;Choose recommended mods&quot;);
+                m_TabController.SetTabLock(true);
+
+                lock (this)
+                {
+                    Monitor.Wait(this);
+                }
+
+                m_TabController.SetTabLock(false);
+            }
+
+            m_TabController.HideTab(&quot;ChooseRecommendedModsTabPage&quot;);
+
+            // And now on to suggestions. Again, we don&#39;t show anything that&#39;s scheduled to
+            // be installed on our suggest list.
+            foreach (var item in toInstall)
+            {
+                suggested.Remove(item);
+            }
+
+            if (suggested.Any())
+            {
+                Util.Invoke(this, () =&gt; UpdateRecommendedDialog(suggested, true));
+
+                m_TabController.ShowTab(&quot;ChooseRecommendedModsTabPage&quot;, 3);
+                m_TabController.RenameTab(&quot;ChooseRecommendedModsTabPage&quot;, &quot;Choose suggested mods&quot;);
+                m_TabController.SetTabLock(true);
+
+                lock (this)
+                {
+                    Monitor.Wait(this);
+                }
+
+                m_TabController.SetTabLock(false);
+            }
+
+            m_TabController.HideTab(&quot;ChooseRecommendedModsTabPage&quot;);
+
+            if (installCanceled)
+            {
+                m_TabController.HideTab(&quot;WaitTabPage&quot;);
+                m_TabController.ShowTab(&quot;ManageModsTabPage&quot;);
+                e.Result = new KeyValuePair&lt;bool, List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;&gt;(false, opts.Key);
+                return;
+            }
+
+            // Now let&#39;s make all our changes.
+
+            m_TabController.RenameTab(&quot;WaitTabPage&quot;, &quot;Installing mods&quot;);
+            m_TabController.ShowTab(&quot;WaitTabPage&quot;);
+            m_TabController.SetTabLock(true);
+
+            
+            var downloader = new NetAsyncDownloader(GUI.user);
+            cancelCallback = () =&gt;
+            {
+                downloader.CancelDownload();
+                installCanceled = true;
+            };
+
+
+            SetDescription(&quot;Uninstalling selected mods&quot;);
+            installer.UninstallList(toUninstall);
+            if (installCanceled) return;
+
+            SetDescription(&quot;Updating selected mods&quot;);
+            installer.Upgrade(toUpgrade, downloader);
+
+
+            // TODO: We should be able to resolve all our provisioning conflicts
+            // before we start installing anything. CKAN.SanityChecker can be used to
+            // pre-check if our changes are going to be consistent.
+
+            bool resolvedAllProvidedMods = false;
+
+            while (!resolvedAllProvidedMods)
+            {
+                if (installCanceled)
+                {
+                    e.Result = new KeyValuePair&lt;bool, List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;&gt;(false,
+                        opts.Key);
+                    return;
+                }
+                try
+                {
+                    var ret = InstallList(toInstall, opts.Value, downloader);
+                    if (!ret)
+                    {
+                        // install failed for some reason, error message is already displayed to the user                    
+                        e.Result = new KeyValuePair&lt;bool, List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;&gt;(false,
+                            opts.Key);
+                        return;
+                    }
+                    resolvedAllProvidedMods = true;
+                }
+                catch (TooManyModsProvideKraken tooManyProvides)
+                {
+                    Util.Invoke(this, () =&gt; UpdateProvidedModsDialog(tooManyProvides));
+
+                    m_TabController.ShowTab(&quot;ChooseProvidedModsTabPage&quot;, 3);
+                    m_TabController.SetTabLock(true);
+
+                    lock (this)
+                    {
+                        Monitor.Wait(this);
+                    }
+
+                    m_TabController.SetTabLock(false);
+
+                    m_TabController.HideTab(&quot;ChooseProvidedModsTabPage&quot;);
+
+                    if (installCanceled)
+                    {
+                        m_TabController.HideTab(&quot;WaitTabPage&quot;);
+                        m_TabController.ShowTab(&quot;ManageModsTabPage&quot;);
+                        e.Result = new KeyValuePair&lt;bool, List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;&gt;(false,
+                            opts.Key);
+                        return;
+                    }
+
+                    m_TabController.ShowTab(&quot;WaitTabPage&quot;);
+                }
+            }
+
+            e.Result = new KeyValuePair&lt;bool, List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;&gt;(true, opts.Key);
+        }
+
+        private bool InstallList(HashSet&lt;string&gt; toInstall, RelationshipResolverOptions options,
+            NetAsyncDownloader downloader)
+        {
+            if (toInstall.Any())
+            {
+                // actual magic happens here, we run the installer with our mod list
+                ModuleInstaller.GetInstance(manager.CurrentInstance, GUI.user).onReportModInstalled = OnModInstalled;
+                cancelCallback = downloader.CancelDownload;
+                try
+                {
+                    ModuleInstaller.GetInstance(manager.CurrentInstance, GUI.user)
+                        .InstallList(toInstall.ToList(), options, downloader);
+                }
+                catch (ModuleNotFoundKraken ex)
+                {
+                    GUI.user.RaiseMessage(&quot;Module {0} required, but not listed in index, or not available for your version of KSP&quot;, ex.module);
+                    return false;
+                }
+                catch (BadMetadataKraken ex)
+                {
+                    GUI.user.RaiseMessage(&quot;Bad metadata detected for module {0}: {1}&quot;, ex.module, ex.Message);
+                    return false;
+                }
+                catch (FileExistsKraken ex)
+                {
+                    if (ex.owning_module != null)
+                    {
+                        GUI.user.RaiseMessage(
+                            &quot;\nOh no! We tried to overwrite a file owned by another mod!\n&quot; +
+                            &quot;Please try a `ckan update` and try again.\n\n&quot; +
+                            &quot;If this problem re-occurs, then it maybe a packaging bug.\n&quot; +
+                            &quot;Please report it at:\n\n&quot; +
+                            &quot;https://github.com/KSP-CKAN/CKAN-meta/issues/new\n\n&quot; +
+                            &quot;Please including the following information in your report:\n\n&quot; +
+                            &quot;File           : {0}\n&quot; +
+                            &quot;Installing Mod : {1}\n&quot; +
+                            &quot;Owning Mod     : {2}\n&quot; +
+                            &quot;CKAN Version   : {3}\n&quot;,
+                            ex.filename, ex.installing_module, ex.owning_module,
+                            Meta.Version()
+                            );
+                    }
+                    else
+                    {
+                        GUI.user.RaiseMessage(
+                            &quot;\n\nOh no!\n\n&quot; +
+                            &quot;It looks like you&#39;re trying to install a mod which is already installed,\n&quot; +
+                            &quot;or which conflicts with another mod which is already installed.\n\n&quot; +
+                            &quot;As a safety feature, the CKAN will *never* overwrite or alter a file\n&quot; +
+                            &quot;that it did not install itself.\n\n&quot; +
+                            &quot;If you wish to install {0} via the CKAN,\n&quot; +
+                            &quot;then please manually uninstall the mod which owns:\n\n&quot; +
+                            &quot;{1}\n\n&quot; + &quot;and try again.\n&quot;,
+                            ex.installing_module, ex.filename
+                            );
+                    }
+
+                    GUI.user.RaiseMessage(&quot;Your GameData has been returned to its original state.\n&quot;);
+                    return false;
+                }
+                catch (InconsistentKraken ex)
+                {
+                    // The prettiest Kraken formats itself for us.
+                    GUI.user.RaiseMessage(ex.InconsistenciesPretty);
+                    return false;
+                }
+                catch (CancelledActionKraken)
+                {
+                    return false;
+                }
+                catch (MissingCertificateKraken kraken)
+                {
+                    // Another very pretty kraken.
+                    GUI.user.RaiseMessage(kraken.ToString());
+                    return false;
+                }
+                catch (DownloadErrorsKraken)
+                {
+                    // User notified in InstallList
+                    return false;
+                }
+                catch (DirectoryNotFoundKraken kraken)
+                {
+                    GUI.user.RaiseMessage(&quot;\n{0}&quot;, kraken.Message);
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void OnModInstalled(CkanModule mod)
+        {
+            AddStatusMessage(&quot;Module \&quot;{0}\&quot; successfully installed&quot;, mod.name);
+        }
+
+        private void PostInstallMods(object sender, RunWorkerCompletedEventArgs e)
+        {
+            UpdateModsList();
+            m_TabController.SetTabLock(false);
+
+            var result = (KeyValuePair&lt;bool, List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;&gt;) e.Result;
+
+            if (result.Key)
+            {
+                if (modChangedCallback != null)
+                {
+                    foreach (var mod in result.Value)
+                    {
+                        modChangedCallback(mod.Key, mod.Value);
+                    }
+                }
+
+                // install successful
+                AddStatusMessage(&quot;Success!&quot;);
+                HideWaitDialog(true);
+                m_TabController.HideTab(&quot;ChangesetTabPage&quot;);
+                ApplyToolButton.Enabled = false;
+            }
+            else
+            {
+                // there was an error
+                // rollback user&#39;s choices but stay on the log dialog
+                AddStatusMessage(&quot;Error!&quot;);
+                SetDescription(&quot;An error occurred, check the log for information&quot;);
+                Util.Invoke(DialogProgressBar, () =&gt; DialogProgressBar.Style = ProgressBarStyle.Continuous);
+                Util.Invoke(DialogProgressBar, () =&gt; DialogProgressBar.Value = 0);
+
+                var opts = result.Value;
+
+                foreach (KeyValuePair&lt;CkanModule, GUIModChangeType&gt; opt in opts)
+                {
+                    switch (opt.Value)
+                    {
+                        case GUIModChangeType.Install:
+                            MarkModForInstall(opt.Key.identifier);
+                            break;
+                        case GUIModChangeType.Update:
+                            MarkModForUpdate(opt.Key.identifier);
+                            break;
+                        case GUIModChangeType.Remove:
+                            MarkModForInstall(opt.Key.identifier, true);
+                            break;
+                    }
+                }
+            }
+
+            Util.Invoke(this, () =&gt; Enabled = true);
+            Util.Invoke(menuStrip1, () =&gt; menuStrip1.Enabled = true);
+        }
+
+        private void UpdateProvidedModsDialog(TooManyModsProvideKraken tooManyProvides)
+        {
+            ChooseProvidedModsLabel.Text =
+                String.Format(
+                    &quot;Module {0} is provided by more than one available module, please choose one of the following mods:&quot;,
+                    tooManyProvides.requested);
+
+            ChooseProvidedModsListView.Items.Clear();
+
+            ChooseProvidedModsListView.ItemChecked += ChooseProvidedModsListView_ItemChecked;
+
+            foreach (CkanModule module in tooManyProvides.modules)
+            {
+                ListViewItem item = new ListViewItem {Tag = module, Checked = true, Text = module.name};
+
+
+                ListViewItem.ListViewSubItem description = 
+                    new ListViewItem.ListViewSubItem {Text = module.@abstract};
+
+                item.SubItems.Add(description);
+                ChooseProvidedModsListView.Items.Add(item);
+            }
+        }
+
+        private void ChooseProvidedModsListView_ItemChecked(object sender, ItemCheckedEventArgs e)
+        {
+            if (!e.Item.Checked)
+            {
+                return;
+            }
+
+            foreach (ListViewItem item in ChooseProvidedModsListView.Items)
+            {
+                if (item != e.Item &amp;&amp; item.Checked)
+                {
+                    item.Checked = false;
+                }
+            }
+        }
+
+        private void ChooseProvidedModsCancelButton_Click(object sender, EventArgs e)
+        {
+            installCanceled = true;
+
+            lock (this)
+            {
+                Monitor.Pulse(this);
+            }
+        }
+
+        private void ChooseProvidedModsContinueButton_Click(object sender, EventArgs e)
+        {
+            foreach (ListViewItem item in ChooseProvidedModsListView.Items)
+            {
+                if (item.Checked)
+                {
+                    var identifier = ((CkanModule) item.Tag).identifier;
+                    toInstall.Add(identifier);
+                    break;
+                }
+            }
+
+            lock (this)
+            {
+                Monitor.Pulse(this);
+            }
+        }
+
+        private void UpdateRecommendedDialog(Dictionary&lt;string, List&lt;string&gt;&gt; mods, bool suggested = false)
+        {
+            if (!suggested)
+            {
+                RecommendedDialogLabel.Text =
+                    &quot;The following modules have been recommended by one or more of the chosen modules:&quot;;
+                RecommendedModsListView.Columns[1].Text = &quot;Recommended by:&quot;;
+            }
+            else
+            {
+                RecommendedDialogLabel.Text =
+                    &quot;The following modules have been suggested by one or more of the chosen modules:&quot;;
+                RecommendedModsListView.Columns[1].Text = &quot;Suggested by:&quot;;
+            }
+
+
+            RecommendedModsListView.Items.Clear();
+
+            foreach (var pair in mods)
+            {
+                CkanModule module;
+
+                try
+                {
+                    var opts = new RelationshipResolverOptions()
+                    {
+                        with_all_suggests = false,
+                        with_recommends = false,
+                        with_suggests = false,
+                        without_enforce_consistency = false,
+                        without_toomanyprovides_kraken = true
+                    };
+                    
+                    var resolver = new RelationshipResolver(new List&lt;string&gt;() {pair.Key}, opts,
+                        RegistryManager.Instance(manager.CurrentInstance).registry, CurrentInstance.Version());
+                    if (!resolver.ModList().Any())
+                    {
+                        continue;
+                    }
+
+                    module = RegistryManager.Instance(manager.CurrentInstance).registry.LatestAvailable(pair.Key, CurrentInstance.Version());
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (module == null)
+                {
+                    continue;
+                }
+
+                ListViewItem item = new ListViewItem {Tag = module, Checked = !suggested, Text = pair.Key};
+
+
+                ListViewItem.ListViewSubItem recommendedBy = new ListViewItem.ListViewSubItem();
+                string recommendedByString = &quot;&quot;;
+
+                bool first = true;
+                foreach (string mod in pair.Value)
+                {
+                    if (!first)
+                    {
+                        recommendedByString += &quot;, &quot;;
+                    }
+                    else
+                    {
+                        first = false;
+                    }
+
+                    recommendedByString += mod;
+                }
+
+                recommendedBy.Text = recommendedByString;
+
+                item.SubItems.Add(recommendedBy);
+
+                ListViewItem.ListViewSubItem description = new ListViewItem.ListViewSubItem {Text = module.@abstract};
+
+                item.SubItems.Add(description);
+
+                RecommendedModsListView.Items.Add(item);
+            }
+        }
+
+        private void RecommendedModsContinueButton_Click(object sender, EventArgs e)
+        {
+            foreach (ListViewItem item in RecommendedModsListView.Items)
+            {
+                if (item.Checked)
+                {
+                    var identifier = ((CkanModule) item.Tag).identifier;
+                    toInstall.Add(identifier);
+                }
+            }
+
+            lock (this)
+            {
+                Monitor.Pulse(this);
+            }
+        }
+
+        private void RecommendedModsCancelButton_Click(object sender, EventArgs e)
+        {
+            installCanceled = true;
+
+            lock (this)
+            {
+                Monitor.Pulse(this);
+            }
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,9,20,67,0],[23,9,23,10,0],[24,13,24,37,0],[26,13,26,24,0],[28,13,29,122,0],[31,13,31,96,0],[34,13,34,47,0],[35,13,35,53,0],[36,13,36,51,0],[39,13,39,20,0],[39,75,39,83,0],[39,22,39,71,0],[40,13,40,14,0],[41,17,41,38,0],[44,25,44,64,0],[45,25,45,31,0],[47,25,47,62,0],[48,25,48,31,0],[50,25,50,62,0],[51,25,51,31,0],[53,13,53,14,0],[39,72,39,74,0],[57,13,57,70,0],[58,13,58,68,0],[60,13,60,20,0],[60,36,60,44,0],[60,22,60,32,0],[61,13,61,14,0],[62,17,62,62,0],[63,17,63,18,0],[64,21,64,55,0],[65,21,65,22,0],[66,25,66,32,0],[66,64,66,85,0],[66,34,66,60,0],[67,25,67,26,0],[69,29,69,30,0],[73,33,79,67,0],[80,33,80,34,0],[82,37,82,75,0],[83,37,83,38,0],[84,41,84,90,0],[85,37,85,38,0],[87,37,87,38,0],[88,41,88,109,0],[89,37,89,38,0],[90,33,90,34,0],[91,29,91,30,0],[93,29,93,43,0],[94,29,94,30,0],[95,29,95,30,0],[96,25,96,26,0],[66,61,66,63,0],[97,21,97,22,0],[99,21,99,53,0],[100,21,100,22,0],[101,25,101,32,0],[101,64,101,83,0],[101,34,101,60,0],[102,25,102,26,0],[104,29,104,30,0],[105,33,108,67,0],[109,33,109,34,0],[110,37,110,73,0],[111,37,111,38,0],[112,41,112,88,0],[113,37,113,38,0],[115,37,115,38,0],[116,41,116,107,0],[117,37,117,38,0],[118,33,118,34,0],[119,29,119,30,0],[121,29,121,43,0],[122,29,122,30,0],[123,29,123,30,0],[124,25,124,26,0],[101,61,101,63,0],[125,21,125,22,0],[126,17,126,18,0],[127,13,127,14,0],[60,33,60,35,0],[131,13,131,20,0],[131,34,131,43,0],[131,22,131,30,0],[132,13,132,14,0],[133,17,133,42,0],[134,13,134,14,0],[131,31,131,33,0],[138,13,138,35,0],[139,13,139,14,0],[140,17,140,41,0],[140,77,140,79,0],[142,17,142,76,0],[143,17,143,102,0],[144,17,144,50,0],[146,17,146,28,0],[147,17,147,18,0],[148,21,148,40,0],[149,17,149,18,0],[151,17,151,51,0],[152,13,152,14,0],[154,13,154,69,0],[158,13,158,20,0],[158,34,158,43,0],[158,22,158,30,0],[159,13,159,14,0],[160,17,160,40,0],[161,13,161,14,0],[158,31,158,33,0],[163,13,163,33,0],[164,13,164,14,0],[165,17,165,41,0],[165,81,165,83,0],[167,17,167,76,0],[168,17,168,100,0],[169,17,169,50,0],[171,17,171,28,0],[172,17,172,18,0],[173,21,173,40,0],[174,17,174,18,0],[176,17,176,51,0],[177,13,177,14,0],[179,13,179,69,0],[181,13,181,33,0],[182,13,182,14,0],[183,17,183,56,0],[184,17,184,62,0],[185,17,185,118,0],[186,17,186,24,0],[191,13,191,73,0],[192,13,192,52,0],[193,13,193,46,0],[196,13,196,63,0],[197,13,198,13,0],[198,14,199,17,0],[199,45,200,17,0],[200,40,201,13,0],[201,14,201,15,0],[204,13,204,58,0],[205,13,205,50,0],[206,13,206,33,0],[206,34,206,41,0],[208,13,208,54,0],[209,13,209,54,0],[216,13,216,50,0],[219,13,219,14,0],[220,17,220,37,0],[221,17,221,18,0],[222,21,223,35,0],[224,21,224,28,0],[227,17,227,18,0],[228,21,228,78,0],[229,21,229,30,0],[230,21,230,22,0],[232,25,233,39,0],[234,25,234,32,0],[236,21,236,52,0],[237,17,237,18,0],[238,17,238,65,0],[239,17,239,18,0],[240,21,240,45,0],[240,86,240,88,0],[242,21,242,77,0],[243,21,243,54,0],[245,21,245,32,0],[246,21,246,22,0],[247,25,247,44,0],[248,21,248,22,0],[250,21,250,55,0],[252,21,252,74,0],[254,21,254,41,0],[255,21,255,22,0],[256,25,256,64,0],[257,25,257,70,0],[258,25,259,39,0],[260,25,260,32,0],[263,21,263,60,0],[264,17,264,18,0],[265,13,265,14,0],[218,13,218,45,0],[267,13,267,113,0],[268,9,268,10,0],[272,9,272,10,0],[273,13,273,33,0],[274,13,274,14,0],[276,17,276,118,0],[277,17,277,60,0],[279,17,279,18,0],[280,21,281,79,0],[282,17,282,18,0],[283,17,283,48,0],[284,17,284,18,0],[285,21,285,144,0],[286,21,286,34,0],[288,17,288,45,0],[289,17,289,18,0],[290,21,290,111,0],[291,21,291,34,0],[293,17,293,44,0],[294,17,294,18,0],[295,21,295,50,0],[296,21,296,22,0],[297,25,310,31,0],[311,21,311,22,0],[313,21,313,22,0],[314,25,324,31,0],[325,21,325,22,0],[327,21,327,103,0],[328,21,328,34,0],[330,17,330,46,0],[331,17,331,18,0],[333,21,333,69,0],[334,21,334,34,0],[336,17,336,46,0],[337,17,337,18,0],[338,21,338,34,0],[340,17,340,56,0],[341,17,341,18,0],[343,21,343,62,0],[344,21,344,34,0],[346,17,346,45,0],[347,17,347,18,0],[349,21,349,34,0],[351,17,351,55,0],[352,17,352,18,0],[353,21,353,68,0],[354,21,354,34,0],[356,13,356,14,0],[358,13,358,25,0],[359,9,359,10,0],[362,9,362,10,0],[363,13,363,81,0],[364,9,364,10,0],[367,9,367,10,0],[368,13,368,30,0],[369,13,369,47,0],[371,13,371,106,0],[373,13,373,28,0],[374,13,374,14,0],[375,17,375,48,0],[376,17,376,18,0],[377,21,377,28,0],[377,41,377,53,0],[377,30,377,37,0],[378,21,378,22,0],[379,25,379,64,0],[380,21,380,22,0],[377,38,377,40,0],[381,17,381,18,0],[384,17,384,46,0],[385,17,385,38,0],[386,17,386,61,0],[387,17,387,49,0],[388,13,388,14,0],[390,13,390,14,0],[393,17,393,44,0],[394,17,394,84,0],[395,17,395,54,0],[395,107,395,109,0],[396,17,396,54,0],[396,81,396,83,0],[398,17,398,41,0],[400,17,400,24,0],[400,76,400,80,0],[400,26,400,72,0],[401,17,401,18,0],[402,21,402,39,0],[405,29,405,67,0],[406,29,406,35,0],[408,29,408,66,0],[409,29,409,35,0],[411,29,411,73,0],[412,29,412,35,0],[414,17,414,18,0],[400,73,400,75,0],[415,13,415,14,0],[417,13,417,37,0],[417,51,417,53,0],[418,13,418,43,0],[418,68,418,70,0],[419,9,419,10,0],[422,9,422,10,0],[423,13,426,48,0],[428,13,428,54,0],[430,13,430,94,0],[432,13,432,20,0],[432,43,432,66,0],[432,22,432,39,0],[433,13,433,14,0],[434,17,434,105,0],[437,17,438,80,0],[440,17,440,48,0],[441,17,441,60,0],[442,13,442,14,0],[432,40,432,42,0],[443,9,443,10,0],[446,9,446,10,0],[447,13,447,33,0],[448,13,448,14,0],[449,17,449,24,0],[452,13,452,20,0],[452,43,452,75,0],[452,22,452,39,0],[453,13,453,14,0],[454,17,454,52,0],[455,17,455,18,0],[456,21,456,42,0],[457,17,457,18,0],[458,13,458,14,0],[452,40,452,42,0],[459,9,459,10,0],[462,9,462,10,0],[463,13,463,36,0],[465,13,465,24,0],[466,13,466,14,0],[467,17,467,37,0],[468,13,468,14,0],[469,9,469,10,0],[472,9,472,10,0],[473,13,473,20,0],[473,43,473,75,0],[473,22,473,39,0],[474,13,474,14,0],[475,17,475,34,0],[476,17,476,18,0],[477,21,477,73,0],[478,21,478,47,0],[479,21,479,27,0],[481,13,481,14,0],[473,40,473,42,0],[483,13,483,24,0],[484,13,484,14,0],[485,17,485,37,0],[486,13,486,14,0],[487,9,487,10,0],[490,9,490,10,0],[491,13,491,28,0],[492,13,492,14,0],[493,17,494,105,0],[495,17,495,77,0],[496,13,496,14,0],[498,13,498,14,0],[499,17,500,103,0],[501,17,501,75,0],[502,13,502,14,0],[505,13,505,51,0],[507,13,507,20,0],[507,34,507,38,0],[507,22,507,30,0],[508,13,508,14,0],[512,17,512,18,0],[513,21,520,23,0],[522,21,523,112,0],[524,21,524,51,0],[525,21,525,22,0],[526,25,526,34,0],[529,21,529,142,0],[530,17,530,18,0],[531,17,531,22,0],[532,17,532,18,0],[533,21,533,30,0],[536,17,536,36,0],[537,17,537,18,0],[538,21,538,30,0],[541,17,541,108,0],[544,17,544,97,0],[545,17,545,49,0],[547,17,547,35,0],[548,17,548,24,0],[548,40,548,50,0],[548,26,548,36,0],[549,17,549,18,0],[550,21,550,32,0],[551,21,551,22,0],[552,25,552,53,0],[553,21,553,22,0],[555,21,555,22,0],[556,25,556,39,0],[557,21,557,22,0],[559,21,559,48,0],[560,17,560,18,0],[548,37,548,39,0],[562,17,562,58,0],[564,17,564,50,0],[566,17,566,119,0],[568,17,568,48,0],[570,17,570,57,0],[571,13,571,14,0],[507,31,507,33,0],[572,9,572,10,0],[575,9,575,10,0],[576,13,576,20,0],[576,43,576,72,0],[576,22,576,39,0],[577,13,577,14,0],[578,17,578,34,0],[579,17,579,18,0],[580,21,580,73,0],[581,21,581,47,0],[582,17,582,18,0],[583,13,583,14,0],[576,40,576,42,0],[585,13,585,24,0],[586,13,586,14,0],[587,17,587,37,0],[588,13,588,14,0],[589,9,589,10,0],[592,9,592,10,0],[593,13,593,36,0],[595,13,595,24,0],[596,13,596,14,0],[597,17,597,37,0],[598,13,598,14,0],[599,9,599,10,0],[395,54,395,107,0],[396,54,396,81,0],[417,37,417,51,0],[418,43,418,68,0],[140,41,140,77,0],[165,41,165,81,0],[198,13,198,14,0],[199,17,199,45,0],[200,17,200,40,0],[201,13,201,14,0],[240,45,240,86,0]]);
+    </script>
+  </body>
+</html>

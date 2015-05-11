@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\urlhandlers.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Diagnostics;
+using System.IO;
+using IniParser;
+using IniParser.Exceptions;
+using IniParser.Model;
+using log4net;
+
+namespace CKAN
+{
+    public static class URLHandlers
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof(URLHandlers));
+        public const string UrlRegistrationArgument = &quot;registerUrl&quot;;
+
+        public static void RegisterURLHandler(Configuration config, IUser user)
+        {
+            try
+            {
+                if (Platform.IsUnix)
+                {
+                    RegisterURLHandler_Linux();
+                }
+                else if(Platform.IsWindows)
+                {
+                    try
+                    {
+                       RegisterURLHandler_Win32();
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        if (config.URLHandlerNoNag)
+                        {
+                            return;
+                        }
+
+                        if (user.RaiseYesNoDialog(@&quot;CKAN requires permission to add a handler for ckan:// URLs.
+Do you want to allow CKAN to do this? If you click no you won&#39;t see this message again.&quot;))
+                        {
+                            // we need elevation to write to the registry
+                            ProcessStartInfo startInfo = new ProcessStartInfo(System.Reflection.Assembly.GetEntryAssembly().Location);
+                            startInfo.Verb = &quot;runas&quot;; // trigger a UAC prompt (if UAC is enabled)
+                            startInfo.Arguments = &quot;gui &quot; + UrlRegistrationArgument;
+                            Process.Start(startInfo);
+                        }
+                        else
+                        {
+                            config.URLHandlerNoNag = true;
+                            config.Save();
+                        }
+                        
+                        throw;
+                    }
+                } else if (Platform.IsMac) {
+                    //TODO
+                }
+            }
+            catch (Exception ex)
+            {
+                log.ErrorFormat(&quot;There was an error while registering the URL handler for ckan:// - {0}&quot;, ex.Message);
+            }
+        }
+
+        private static void RegisterURLHandler_Win32()
+        {
+            log.InfoFormat(&quot;Adding URL handler to registry&quot;);
+
+            var root = Microsoft.Win32.Registry.ClassesRoot;
+
+            if (root.OpenSubKey(&quot;ckan&quot;) != null)
+            {
+                try
+                {
+                    var path =
+                        (string)root.OpenSubKey(&quot;ckan&quot;)
+                            .OpenSubKey(&quot;shell&quot;)
+                            .OpenSubKey(&quot;open&quot;)
+                            .OpenSubKey(&quot;command&quot;)
+                            .GetValue(&quot;&quot;);
+
+                    if (path == (System.Reflection.Assembly.GetExecutingAssembly().Location + &quot; gui %1&quot;))
+                    {
+                        log.InfoFormat(&quot;URL handler already exists with the same path&quot;);
+                        return;
+                    }
+                }
+                catch (Exception)
+                {
+                }
+
+                root.DeleteSubKeyTree(&quot;ckan&quot;);
+            }
+
+            var key = root.CreateSubKey(&quot;ckan&quot;);
+            key.SetValue(&quot;&quot;, &quot;URL: ckan Protocol&quot;);
+            key.SetValue(&quot;URL Protocol&quot;, &quot;&quot;);
+            key.CreateSubKey(&quot;shell&quot;).CreateSubKey(&quot;open&quot;).CreateSubKey(&quot;command&quot;).SetValue
+                (&quot;&quot;, System.Reflection.Assembly.GetExecutingAssembly().Location + &quot; gui %1&quot;);
+        }
+
+        private const string MimeAppsListPath = &quot;~/.local/share/applications/mimeapps.list&quot;;
+        private const string ApplicationsPath = &quot;~/.local/share/applications/&quot;;
+        private const string HandlerFileName = &quot;ckan-handler.desktop&quot;;
+
+        private static void RegisterURLHandler_Linux()
+        {
+            var parser = new FileIniDataParser();
+            IniData data = null;
+
+            log.InfoFormat(&quot;Trying to register URL handler&quot;);
+
+            try
+            {
+                data = parser.ReadFile(MimeAppsListPath); //();
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                log.WarnFormat(&quot;Skipping URL handler: {0}&quot;, ex.Message);
+                return;
+            }
+            catch (FileNotFoundException ex)
+            {
+                log.WarnFormat(&quot;Skipping URL handler: {0}&quot;, ex.Message);
+                return;
+            }
+            catch (ParsingException ex)
+            {
+                log.WarnFormat(&quot;Skipping URL handler: {0}&quot;, ex.Message);
+                return;
+            }
+
+            data[&quot;Added Associations&quot;].RemoveKey(&quot;x-scheme-handler/ckan&quot;);
+            data[&quot;Added Associations&quot;].AddKey(&quot;x-scheme-handler/ckan&quot;, HandlerFileName);
+
+            parser.WriteFile(MimeAppsListPath, data);
+
+            var handlerPath = Path.Combine(ApplicationsPath, HandlerFileName);
+            var handlerDirectory = Path.GetDirectoryName(handlerPath);
+
+            if (handlerDirectory == null || !Directory.Exists(handlerDirectory))
+            {
+                log.ErrorFormat(&quot;Error: {0} doesn&#39;t exist&quot;, handlerDirectory);
+                return;
+            }
+
+            if (File.Exists(handlerPath))
+            {
+                File.Delete(handlerPath);
+            }
+
+            File.WriteAllText(handlerPath, &quot;&quot;);
+            data = parser.ReadFile(handlerPath);
+            data.Sections.AddSection(&quot;Desktop Entry&quot;);
+            data[&quot;Desktop Entry&quot;].AddKey(&quot;Version&quot;, &quot;1.0&quot;);
+            data[&quot;Desktop Entry&quot;].AddKey(&quot;Type&quot;, &quot;Application&quot;);
+            data[&quot;Desktop Entry&quot;].AddKey(&quot;Exec&quot;, System.Reflection.Assembly.GetExecutingAssembly().Location + &quot; gui %u&quot;);
+            data[&quot;Desktop Entry&quot;].AddKey(&quot;Icon&quot;, &quot;ckan&quot;);
+            data[&quot;Desktop Entry&quot;].AddKey(&quot;StartupNotify&quot;, &quot;true&quot;);
+            data[&quot;Desktop Entry&quot;].AddKey(&quot;Terminal&quot;, &quot;false&quot;);
+            data[&quot;Desktop Entry&quot;].AddKey(&quot;Categories&quot;, &quot;Utility&quot;);
+            data[&quot;Desktop Entry&quot;].AddKey(&quot;MimeType&quot;, &quot;x-scheme-handler/ckan&quot;);
+            data[&quot;Desktop Entry&quot;].AddKey(&quot;Name&quot;, &quot;CKAN Launcher&quot;);
+            data[&quot;Desktop Entry&quot;].AddKey(&quot;Comment&quot;, &quot;Launch CKAN&quot;);
+
+            parser.WriteFile(handlerPath, data);
+        }
+
+    }
+
+}
+
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[17,9,17,10,0],[19,13,19,14,0],[20,17,20,37,0],[21,17,21,18,0],[22,21,22,48,0],[23,17,23,18,0],[24,22,24,44,0],[25,17,25,18,0],[27,21,27,22,0],[28,24,28,51,0],[29,21,29,22,0],[30,21,30,59,0],[31,21,31,22,0],[32,25,32,52,0],[33,25,33,26,0],[34,29,34,36,0],[37,25,38,91,0],[39,25,39,26,0],[41,29,41,135,0],[42,29,42,54,0],[43,29,43,84,0],[44,29,44,54,0],[45,25,45,26,0],[47,25,47,26,0],[48,29,48,59,0],[49,29,49,43,0],[50,25,50,26,0],[52,25,52,31,0],[54,17,54,18,0],[54,24,54,43,0],[54,44,54,45,0],[56,17,56,18,0],[57,13,57,14,0],[58,13,58,33,0],[59,13,59,14,0],[60,17,60,119,0],[61,13,61,14,0],[62,9,62,10,0],[65,9,65,10,0],[66,13,66,62,0],[68,13,68,61,0],[70,13,70,49,0],[71,13,71,14,0],[73,17,73,18,0],[74,21,79,43,0],[81,21,81,106,0],[82,21,82,22,0],[83,25,83,89,0],[84,25,84,32,0],[86,17,86,18,0],[87,17,87,34,0],[88,17,88,18,0],[89,17,89,18,0],[91,17,91,47,0],[92,13,92,14,0],[94,13,94,49,0],[95,13,95,52,0],[96,13,96,46,0],[97,13,98,94,0],[99,9,99,10,0],[106,9,106,10,0],[107,13,107,50,0],[108,13,108,33,0],[110,13,110,62,0],[113,13,113,14,0],[114,17,114,58,0],[115,13,115,14,0],[116,13,116,50,0],[117,13,117,14,0],[118,17,118,73,0],[119,17,119,24,0],[121,13,121,45,0],[122,13,122,14,0],[123,17,123,73,0],[124,17,124,24,0],[126,13,126,40,0],[127,13,127,14,0],[128,17,128,73,0],[129,17,129,24,0],[132,13,132,75,0],[133,13,133,89,0],[135,13,135,54,0],[137,13,137,79,0],[138,13,138,71,0],[140,13,140,81,0],[141,13,141,14,0],[142,17,142,79,0],[143,17,143,24,0],[146,13,146,42,0],[147,13,147,14,0],[148,17,148,42,0],[149,13,149,14,0],[151,13,151,48,0],[152,13,152,49,0],[153,13,153,55,0],[154,13,154,60,0],[155,13,155,65,0],[156,13,156,122,0],[157,13,157,58,0],[158,13,158,67,0],[159,13,159,63,0],[160,13,160,67,0],[161,13,161,79,0],[162,13,162,67,0],[163,13,163,68,0],[165,13,165,49,0],[166,9,166,10,0],[13,9,13,86,0]]);
+    </script>
+  </body>
+</html>

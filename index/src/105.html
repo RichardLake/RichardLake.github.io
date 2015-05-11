@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-cmdline\consoleuser.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Text.RegularExpressions;
+using log4net;
+
+namespace CKAN.CmdLine
+{
+    public class ConsoleUser : NullUser
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof(ConsoleUser));
+
+        private bool m_Headless = false;
+        public ConsoleUser(bool headless)
+        {
+            m_Headless = headless;
+        }
+
+        public override bool Headless
+        {
+            get
+            {
+                return m_Headless;
+            }
+        }
+
+        protected override bool DisplayYesNoDialog(string message)
+        {
+            if (m_Headless)
+            {
+                return true;
+            }
+
+            Console.Write(&quot;{0} [Y/N] &quot;, message);
+            while (true)
+            {
+                var input = Console.In.ReadLine();
+
+                if (input == null)
+                {
+                    log.ErrorFormat(&quot;No console available for input, assuming no.&quot;);
+                    return false;
+                }
+
+                input = input.ToLower().Trim();
+
+                if (input.Equals(&quot;y&quot;) || input.Equals(&quot;yes&quot;))
+                {
+                    return true;
+                }
+                if (input.Equals(&quot;n&quot;) || input.Equals(&quot;no&quot;))
+                {
+                    return false;
+                }
+                Console.Write(&quot;Invaild input. Please enter yes or no&quot;);
+            }
+        }
+
+        protected override void DisplayMessage(string message, params object[] args)
+        {
+            Console.WriteLine(message, args);
+        }
+
+        protected override void DisplayError(string message, params object[] args)
+        {
+            Console.Error.WriteLine(message, args);
+        }
+
+        protected override int DisplaySelectionDialog(string message, params object[] args)
+        {
+            const int return_cancel = -1;
+
+            // Check for the headless flag.
+            if (m_Headless)
+            {
+                // Return that the user cancelled the selection process.
+                return return_cancel;
+            }
+
+            // Validate input.
+            if (String.IsNullOrWhiteSpace(message))
+            {
+                throw new Kraken(&quot;Passed message string must be non-empty.&quot;);
+            }
+
+            if (args.Length == 0)
+            {
+                throw new Kraken(&quot;Passed list of selection candidates must be non-empty.&quot;);
+            }
+
+            // Check if we have a default selection.
+            int defaultSelection = -1;
+
+            if (args[0] is int)
+            {
+                // Check that the default selection makes sense.
+                defaultSelection = (int)args[0];
+
+                if (defaultSelection &lt; 0 || defaultSelection &gt; args.Length - 1)
+                {
+                    throw new Kraken(&quot;Passed default arguments is out of range of the selection candidates.&quot;);
+                }
+
+                // Extract the relevant arguments.
+                object[] newArgs = new object[args.Length - 1];
+
+                for (int i = 1; i &lt; args.Length; i++)
+                {
+                    newArgs[i - 1] = args[i];
+                }
+
+                args = newArgs;
+            }
+
+            // Further data validation.
+            foreach (object argument in args)
+            {
+                if (String.IsNullOrWhiteSpace(argument.ToString()))
+                {
+                    throw new Kraken(&quot;Candidate may not be empty.&quot;);
+                }
+            }
+
+            // List options.
+            for (int i = 0; i &lt; args.Length; i++)
+            {
+                string CurrentRow = String.Format(&quot;{0}&quot;, i + 1);
+
+                if (i == defaultSelection)
+                {
+                    CurrentRow += &quot;*&quot;;
+                }
+
+                CurrentRow += String.Format(&quot;) {0}&quot;, args[i]);
+
+                RaiseMessage(CurrentRow);
+            }
+
+            // Create message string.
+            string output = String.Format(&quot;Enter a number between {0} and {1} (To cancel press \&quot;c\&quot; or \&quot;n\&quot;.&quot;, 1, args.Length);
+
+            if (defaultSelection &gt;= 0)
+            {
+                output += String.Format(&quot; \&quot;Enter\&quot; will select {0}.&quot;, defaultSelection + 1);
+            }
+
+            output += &quot;): &quot;;
+
+            RaiseMessage(output);
+
+            bool valid = false;
+            int result = 0;
+
+            while (!valid)
+            {
+                // Wait for input from the command line.
+                string input = Console.In.ReadLine();
+
+                if (input == null)
+                {
+                    // No console present, cancel the process.
+                    return return_cancel;
+                }
+
+                input = input.Trim().ToLower();
+
+                // Check for default selection.
+                if (String.IsNullOrEmpty(input))
+                {
+                    if (defaultSelection &gt;= 0)
+                    {
+                        return defaultSelection;
+                    }
+                }
+
+                // Check for cancellation characters.
+                if (input == &quot;c&quot; || input == &quot;n&quot;)
+                {
+                    RaiseMessage(&quot;Selection cancelled.&quot;);
+
+                    return return_cancel;
+                }
+
+                // Attempt to parse the input.
+                try
+                {
+                    result = Convert.ToInt32(input);
+                }
+                catch (FormatException)
+                {
+                    RaiseMessage(&quot;The input is not a number.&quot;);
+                    continue;
+                }
+                catch (OverflowException)
+                {
+                    RaiseMessage(&quot;The number in the input is too large.&quot;);
+                    continue;
+                }
+
+                // Check the input against the boundaries.
+                if (result &gt; args.Length)
+                {
+                    RaiseMessage(&quot;The number in the input is too large.&quot;);
+                    RaiseMessage(output);
+
+                    continue;
+                }
+                else if (result &lt; 1)
+                {
+                    RaiseMessage(&quot;The number in the input is too small.&quot;);
+                    RaiseMessage(output);
+
+                    continue;
+                }
+
+                // The list we provide is index 1 based, but the array is index 0 based.
+                result--;
+
+                // We have checked for all errors and have gotten a valid result. Stop the input loop.
+                valid = true;
+            }
+
+            return result;
+        }
+
+        protected override void ReportProgress(string format, int percent)
+        {
+            if (Regex.IsMatch(format, &quot;download&quot;, RegexOptions.IgnoreCase))
+            {
+                Console.Write(
+                    // The \r at the front here causes download messages to *overwrite* each other.
+                     String.Format(&quot;\r{0} - {1}%           &quot;, format, percent)
+                 );
+            }
+            else
+            {
+                // The percent looks weird on non-download messages.
+                // The leading newline makes sure we don&#39;t end up with a mess from previous
+                // download messages.
+                Console.Write(&quot;\n{0}&quot;, format);
+            }
+        }
+        protected override void ReportDownloadsComplete(Uri[] urls, string[] filenames, Exception[] errors)
+        {
+        }
+        public override int WindowWidth
+        {
+            get { return Console.WindowWidth; }
+        }
+
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[12,9,12,42,0],[14,13,14,35,0],[15,9,15,10,0],[21,17,21,35,0],[27,13,27,28,0],[29,17,29,29,0],[32,13,32,50,0],[35,17,35,51,0],[37,17,37,35,0],[39,21,39,85,0],[40,21,40,34,0],[43,17,43,48,0],[45,17,45,62,0],[47,21,47,33,0],[49,17,49,61,0],[51,21,51,34,0],[53,17,53,72,0],[33,13,33,25,0],[59,13,59,46,0],[60,9,60,10,0],[64,13,64,52,0],[65,9,65,10,0],[72,13,72,28,0],[75,17,75,38,0],[79,13,79,52,0],[81,17,81,78,0],[84,13,84,34,0],[86,17,86,92,0],[90,13,90,39,0],[92,13,92,32,0],[95,17,95,49,0],[97,17,97,80,0],[99,21,99,111,0],[103,17,103,64,0],[105,22,105,31,0],[107,21,107,46,0],[105,50,105,53,0],[105,33,105,48,0],[110,17,110,32,0],[114,41,114,45,0],[114,22,114,37,0],[116,17,116,68,0],[118,21,118,69,0],[114,38,114,40,0],[123,18,123,27,0],[125,17,125,65,0],[127,17,127,43,0],[129,21,129,39,0],[132,17,132,63,0],[134,17,134,42,0],[123,46,123,49,0],[123,29,123,44,0],[138,13,138,130,0],[140,13,140,39,0],[142,17,142,94,0],[145,13,145,29,0],[147,13,147,34,0],[149,13,149,32,0],[150,13,150,28,0],[155,17,155,54,0],[157,17,157,35,0],[160,21,160,42,0],[163,17,163,48,0],[166,17,166,49,0],[168,21,168,47,0],[170,25,170,49,0],[175,17,175,50,0],[177,21,177,58,0],[179,21,179,42,0],[185,21,185,53,0],[186,17,186,18,0],[187,17,187,40,0],[189,21,189,64,0],[190,21,190,30,0],[192,17,192,42,0],[194,21,194,75,0],[195,21,195,30,0],[199,17,199,42,0],[201,21,201,75,0],[202,21,202,42,0],[204,21,204,30,0],[206,22,206,37,0],[208,21,208,75,0],[209,21,209,42,0],[211,21,211,30,0],[215,17,215,26,0],[218,17,218,30,0],[152,13,152,27,0],[221,13,221,27,0],[226,13,226,76,0],[228,17,231,20,0],[232,13,232,14,0],[238,17,238,48,0],[240,9,240,10,0],[243,9,243,10,0],[246,19,246,46,0],[9,9,9,86,0]]);
+    </script>
+  </body>
+</html>

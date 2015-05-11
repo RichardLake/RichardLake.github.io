@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\fileidentifier.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.IO;
+using System.Linq;
+using log4net;
+
+namespace CKAN
+{
+	public class FileIdentifier
+	{
+        private static readonly ILog log = LogManager.GetLogger(typeof(FileIdentifier));
+
+		/// &lt;summary&gt;
+		/// Checks if the file is of type ASCII.
+		/// &lt;/summary&gt;
+		/// &lt;returns&gt;&lt;c&gt;true&lt;/c&gt;, if most likely ASCII, &lt;c&gt;false&lt;/c&gt; otherwise.&lt;/returns&gt;
+		/// &lt;param name=&quot;stream&quot;&gt;Stream to the file.&lt;/param&gt;
+		private static bool CheckASCII(Stream stream)
+		{
+			// Rewind the stream to the origin of the file.
+			stream.Seek(0, SeekOrigin.Begin);
+
+			// Define the buffer.
+			byte[] buffer = new byte[1024 * 32];
+
+			// Read as many bytes as possible.
+			int bytes_read = stream.Read(buffer, 0, buffer.Length);
+
+			// Look for a 0 termination char before the end.
+			for (int i = 0; i &lt; bytes_read - 1; i++)
+			{
+				if (buffer[i] == 0)
+				{
+					return false;
+				}
+			}
+
+			// Most likely an ASCII file.
+			return true;
+		}
+
+		/// &lt;summary&gt;
+		/// Checks if the file is of type gzip.
+		/// &lt;/summary&gt;
+		/// &lt;returns&gt;&lt;c&gt;true&lt;/c&gt;, if gzip, &lt;c&gt;false&lt;/c&gt; otherwise.&lt;/returns&gt;
+		/// &lt;param name=&quot;stream&quot;&gt;Stream to the file.&lt;/param&gt;
+		private static bool CheckGZip(Stream stream)
+		{
+			// Rewind the stream to the origin of the file.
+			stream.Seek(0, SeekOrigin.Begin);
+
+			// Define the buffer and magic types to compare against.
+			byte[] buffer = new byte[2];
+			byte[] gzip_identifier = new byte[] { 0x1F, 0x8B };
+
+			// Read the first 2 bytes of the file into the buffer.
+			int bytes_read = stream.Read(buffer, 0, buffer.Length);
+
+			// Check if we reached EOF before reading enough bytes.
+			if (bytes_read != buffer.Length)
+			{
+				return false;
+			}
+
+			// Compare against the magic numbers.
+			if (buffer.SequenceEqual(gzip_identifier))
+			{
+				return true;
+			}
+
+			return false;
+		}
+
+		/// &lt;summary&gt;
+		/// Checks if the file is of type tar.
+		/// &lt;/summary&gt;
+		/// &lt;returns&gt;&lt;c&gt;true&lt;/c&gt;, if tar, &lt;c&gt;false&lt;/c&gt; otherwise.&lt;/returns&gt;
+		/// &lt;param name=&quot;stream&quot;&gt;Stream to the file.&lt;/param&gt;
+		private static bool CheckTar(Stream stream)
+		{
+			if (stream.CanSeek)
+			{
+				// Rewind the stream to the origin of the file.
+				stream.Seek (0, SeekOrigin.Begin);
+			}
+
+			// Define the buffer and magic types to compare against.
+			byte[] buffer = new byte[5];
+			byte[] tar_identifier = new byte[] { 0x75, 0x73, 0x74, 0x61, 0x72 };
+
+			// Advance the stream position to offset 257. This method circumvents stream which can&#39;t seek.
+			for(int i = 0; i &lt; 257; i++)
+			{
+				stream.ReadByte();
+			}
+
+			// Read 5 bytes into the buffer.
+			int bytes_read = stream.Read(buffer, 0, buffer.Length);
+
+			// Check if we reached EOF before reading enough bytes.
+			if (bytes_read != buffer.Length)
+			{
+				return false;
+			}
+
+			// Compare against the magic numbers.
+			if (buffer.SequenceEqual(tar_identifier))
+			{
+				return true;
+			}
+
+			return false;
+		}
+
+		/// &lt;summary&gt;
+		/// Checks if the file is of type zip.
+		/// &lt;/summary&gt;
+		/// &lt;returns&gt;&lt;c&gt;true&lt;/c&gt;, if zip, &lt;c&gt;false&lt;/c&gt; otherwise.&lt;/returns&gt;
+		/// &lt;param name=&quot;stream&quot;&gt;Stream to the file.&lt;/param&gt;
+		private static bool CheckZip(Stream stream)
+		{
+			// Rewind the stream to the origin of the file.
+			stream.Seek(0, SeekOrigin.Begin);
+
+			// Define the buffer and magic types to compare against.
+			byte[] buffer = new byte[4];
+			byte[] zip_identifier = new byte[] { 0x50, 0x4B, 0x03, 0x04 };
+			byte[] zip_identifier_empty = new byte[] { 0x50, 0x4B, 0x05, 0x06 };
+			byte[] zip_identifier_spanned = new byte[] { 0x50, 0x4B, 0x07, 0x08 };
+
+			// Read the first 4 bytes of the file into the buffer.
+			int bytes_read = stream.Read(buffer, 0, buffer.Length);
+
+			// Check if we reached EOF before reading enough bytes.
+			if (bytes_read != buffer.Length)
+			{
+				return false;
+			}
+
+			// Compare against the magic numbers.
+			if (buffer.SequenceEqual(zip_identifier) || buffer.SequenceEqual(zip_identifier_empty) || buffer.SequenceEqual(zip_identifier_spanned))
+			{
+				return true;
+			}
+
+			return false;
+		}
+
+		/// &lt;summary&gt;
+		/// Identifies the file using magic numbers.
+		/// &lt;/summary&gt;
+		/// &lt;returns&gt;The filetype.&lt;/returns&gt;
+		/// &lt;param name=&quot;stream&quot;&gt;Open stream to the file.&lt;/param&gt;
+		public static FileType IdentifyFile(Stream stream)
+		{
+			FileType type = FileType.Unknown;
+
+			// Check the input.
+			if (stream == null)
+			{
+				return type;
+			}
+
+			// Make sure the stream supports seeking.
+			if (!stream.CanSeek)
+			{
+				return type;
+			}
+
+			// Start performing checks.
+			if (CheckGZip(stream))
+			{
+				// This may contain a tar file inside, create a new stream and check.
+				stream.Seek (0, SeekOrigin.Begin);
+				using (ICSharpCode.SharpZipLib.GZip.GZipInputStream gz_stream = new ICSharpCode.SharpZipLib.GZip.GZipInputStream (stream))
+				{
+					if (CheckTar(gz_stream))
+					{
+						type = FileType.TarGz;
+					}
+					else
+					{
+						type = FileType.GZip;
+					}
+				}
+			}
+			else if (CheckTar(stream))
+			{
+				type = FileType.Tar;
+			}
+			else if (CheckZip(stream))
+			{
+				type = FileType.Zip;
+			}
+			else if (CheckASCII(stream))
+			{
+				type = FileType.ASCII;
+			}
+
+			return type;
+		}
+
+		/// &lt;summary&gt;
+		/// Identifies the file using magic numbers.
+		/// &lt;/summary&gt;
+		/// &lt;returns&gt;The filetype.&lt;/returns&gt;
+		/// &lt;param name=&quot;path&quot;&gt;Path to the file.&lt;/param&gt;
+		public static FileType IdentifyFile(string path)
+		{
+			FileType type = FileType.Unknown;
+
+			// Check input.
+			if (string.IsNullOrWhiteSpace(path))
+			{
+				return type;
+			}
+
+			// Check that the file exists.
+			if (!File.Exists(path))
+			{
+				return type;
+			}
+
+			// Identify the file using the stream method.
+			using (Stream stream = File.OpenRead (path))
+			{
+				type = IdentifyFile(stream);
+			}
+
+			return type;
+		}
+	}
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,5,32,6,0],[33,6,33,19,0],[60,4,60,5,0],[61,5,61,18,0],[135,4,135,5,0],[136,5,136,18,0],[159,4,159,5,0],[160,5,160,17,0],[165,4,165,5,0],[166,5,166,17,0],[181,6,181,7,0],[182,7,182,28,0],[183,6,183,7,0],[213,4,213,5,0],[214,5,214,17,0],[219,4,219,5,0],[220,5,220,17,0],[18,3,18,4,1],[20,4,20,37,1],[23,4,23,40,1],[26,4,26,59,1],[29,9,29,18,1],[30,4,30,5,1],[31,5,31,24,1],[35,4,35,5,1],[29,40,29,43,1],[29,20,29,38,1],[38,4,38,16,1],[39,3,39,4,1],[47,3,47,4,1],[49,4,49,37,1],[52,4,52,32,1],[53,4,53,55,1],[56,4,56,59,1],[59,4,59,36,1],[65,4,65,46,1],[66,4,66,5,1],[67,5,67,17,1],[70,4,70,17,1],[71,3,71,4,1],[79,3,79,4,1],[80,4,80,23,1],[81,4,81,5,1],[83,5,83,39,1],[84,4,84,5,1],[87,4,87,32,1],[88,4,88,72,1],[91,8,91,17,1],[92,4,92,5,1],[93,5,93,23,1],[94,4,94,5,1],[91,28,91,31,1],[91,19,91,26,1],[97,4,97,59,1],[100,4,100,36,1],[101,4,101,5,1],[102,5,102,18,1],[106,4,106,45,1],[107,4,107,5,1],[108,5,108,17,1],[111,4,111,17,1],[112,3,112,4,1],[120,3,120,4,1],[122,4,122,37,1],[125,4,125,32,1],[126,4,126,66,1],[127,4,127,72,1],[128,4,128,74,1],[131,4,131,59,1],[134,4,134,36,1],[140,4,140,139,1],[141,4,141,5,1],[142,5,142,17,1],[145,4,145,17,1],[146,3,146,4,1],[154,3,154,4,1],[155,4,155,37,1],[158,4,158,23,1],[164,4,164,24,1],[170,4,170,26,1],[171,4,171,5,1],[173,5,173,39,1],[174,12,174,126,1],[175,5,175,6,1],[176,6,176,30,1],[177,6,177,7,1],[178,7,178,29,1],[179,6,179,7,1],[184,5,184,6,1],[185,4,185,5,1],[186,9,186,30,1],[187,4,187,5,1],[188,5,188,25,1],[189,4,189,5,1],[190,9,190,30,1],[191,4,191,5,1],[192,5,192,25,1],[193,4,193,5,1],[194,9,194,32,1],[195,4,195,5,1],[196,5,196,27,1],[197,4,197,5,1],[199,4,199,16,1],[200,3,200,4,1],[208,3,208,4,1],[209,4,209,37,1],[212,4,212,40,1],[218,4,218,27,1],[224,11,224,47,1],[225,4,225,5,1],[226,5,226,33,1],[227,4,227,5,1],[229,4,229,16,1],[230,3,230,4,1],[10,9,10,89,1]]);
+    </script>
+  </body>
+</html>

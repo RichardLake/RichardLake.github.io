@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\net\autoupdate.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Diagnostics;
+using System.Net;
+using System.Reflection;
+using log4net;
+using Newtonsoft.Json;
+
+namespace CKAN
+{
+
+    public class AutoUpdate
+    {
+
+        private static readonly ILog log = LogManager.GetLogger(typeof(AutoUpdate));
+
+        private static readonly Uri latestCKANReleaseApiUrl = new Uri(&quot;https://api.github.com/repos/KSP-CKAN/CKAN/releases/latest&quot;);
+
+        private static readonly Uri latestUpdaterReleaseApiUrl = new Uri(
+            &quot;https://api.github.com/repos/KSP-CKAN/CKAN-autoupdate/releases/latest&quot;);
+
+        public static Version FetchLatestCkanVersion()
+        {
+            var response = MakeRequest(latestCKANReleaseApiUrl);
+            return new Version(response.tag_name.ToString());
+        }
+
+        public static string FetchLatestCkanVersionReleaseNotes()
+        {
+            var response = MakeRequest(latestCKANReleaseApiUrl);
+            string body = response.body.ToString();
+            return body.Split(new string[] {&quot;\r\n---\r\n&quot;}, StringSplitOptions.None)[1];
+        }
+
+        public static void StartUpdateProcess(bool launchCKANAfterUpdate)
+        {
+            var pid = Process.GetCurrentProcess().Id;
+            
+            // download updater app
+            string updaterFilename = System.IO.Path.GetTempPath() + Guid.NewGuid().ToString() + &quot;.exe&quot;;
+
+            var web = new WebClient();
+            web.Headers.Add(&quot;user-agent&quot;, Net.UserAgentString);
+            web.DownloadFile(FetchUpdaterUrl(), updaterFilename);
+
+            // download new ckan.exe
+            string ckanFilename = System.IO.Path.GetTempPath() + Guid.NewGuid().ToString() + &quot;.exe&quot;;
+            web.DownloadFile(FetchCkanUrl(), ckanFilename);
+
+            var path = Assembly.GetEntryAssembly().Location;
+
+            // run updater
+            
+            // mark as executable if on Linux or Mac
+            if (Platform.IsUnix || Platform.IsMac)
+            {
+                // TODO: It would be really lovely (and safer!) to use the native system
+                // call here: http://docs.go-mono.com/index.aspx?link=M:Mono.Unix.Native.Syscall.chmod
+
+                string command = string.Format(&quot;+x \&quot;{0}\&quot;&quot;, updaterFilename);
+
+                ProcessStartInfo permsinfo = new ProcessStartInfo(&quot;chmod&quot;, command);
+                permsinfo.UseShellExecute = false;
+                Process permsprocess = Process.Start(permsinfo);
+                permsprocess.WaitForExit();
+            }
+
+            var args = String.Format(&quot;{0} \&quot;{1}\&quot; \&quot;{2}\&quot; {3}&quot;, pid, path, ckanFilename, launchCKANAfterUpdate ? &quot;launch&quot; : &quot;nolaunch&quot;);
+
+            ProcessStartInfo processInfo = new ProcessStartInfo();
+            processInfo.Verb = &quot;runas&quot;;
+            processInfo.FileName = updaterFilename;
+            processInfo.Arguments = args;
+            processInfo.UseShellExecute = false;
+            Process.Start(processInfo);
+
+            // exit this ckan instance
+            Environment.Exit(0);
+        }
+            
+        private static Uri FetchUpdaterUrl()
+        {
+            var response = MakeRequest(latestUpdaterReleaseApiUrl);
+            var assets = response.assets[0];
+            return new Uri(assets.browser_download_url.ToString());
+        }
+
+        private static Uri FetchCkanUrl()
+        {
+            var response = MakeRequest(latestCKANReleaseApiUrl);
+            var assets = response.assets[0];
+            return new Uri(assets.browser_download_url.ToString());
+        }
+
+        private static dynamic MakeRequest(Uri url)
+        {
+            var web = new WebClient();
+            web.Headers.Add(&quot;user-agent&quot;, Net.UserAgentString);
+
+            string result = &quot;&quot;;
+            try
+            {
+                result = web.DownloadString(url);
+            }
+            catch (WebException webEx)
+            {
+                log.ErrorFormat(&quot;WebException while accessing {0}: {1}&quot;, url, webEx);
+                throw;
+            }
+
+            return JsonConvert.DeserializeObject(result);
+        }
+
+    }
+
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,9,22,10,0],[23,13,23,65,0],[24,13,24,62,0],[25,9,25,10,0],[28,9,28,10,0],[29,13,29,65,0],[30,13,30,52,0],[31,13,31,89,0],[32,9,32,10,0],[35,9,35,10,0],[36,13,36,54,0],[39,13,39,104,0],[41,13,41,39,0],[42,13,42,64,0],[43,13,43,66,0],[46,13,46,101,0],[47,13,47,60,0],[49,13,49,61,0],[54,13,54,51,0],[55,13,55,14,0],[59,17,59,79,0],[61,17,61,85,0],[62,17,62,51,0],[63,17,63,65,0],[64,17,64,44,0],[65,13,65,14,0],[67,13,67,137,0],[69,13,69,67,0],[70,13,70,40,0],[71,13,71,52,0],[72,13,72,42,0],[73,13,73,49,0],[74,13,74,40,0],[77,13,77,33,0],[78,9,78,10,0],[81,9,81,10,0],[82,13,82,68,0],[83,13,83,45,0],[84,13,84,68,0],[85,9,85,10,0],[88,9,88,10,0],[89,13,89,65,0],[90,13,90,45,0],[91,13,91,68,0],[92,9,92,10,0],[95,9,95,10,0],[96,13,96,39,0],[97,13,97,64,0],[99,13,99,32,0],[101,13,101,14,0],[102,17,102,50,0],[103,13,103,14,0],[104,13,104,39,0],[105,13,105,14,0],[106,17,106,86,0],[107,17,107,23,0],[110,13,110,58,0],[111,9,111,10,0],[14,9,14,85,0],[16,9,16,133,0],[18,9,19,86,0]]);
+    </script>
+  </body>
+</html>

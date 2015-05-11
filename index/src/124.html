@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\ks\ksmod.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using log4net;
+using Newtonsoft.Json.Linq;
+
+namespace CKAN.NetKAN
+{
+    public class KSMod : CkanInflator
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof (KSMod));
+        public int id; // KSID
+
+        // These get filled in from JSON deserialisation.
+        public string license;
+        public string name;
+        public string short_description;
+        public string author;
+        public KSVersion[] versions;
+        public Uri website;
+        public int default_version_id;
+
+        public override string ToString()
+        {
+            return string.Format(&quot;{0}&quot;, name);
+        }
+
+        /// &lt;summary&gt;
+        ///     Takes a JObject and inflates it with KS metadata.
+        ///     This will not overwrite fields that already exist.
+        /// &lt;/summary&gt;
+        override public void InflateMetadata(JObject metadata, string filename, object context)
+        {
+            var version = (KSVersion)context;
+
+            log.DebugFormat(&quot;Inflating {0}&quot;, metadata[&quot;identifier&quot;]);
+
+            // Check how big our file is
+            long download_size = (new FileInfo (filename)).Length;
+
+            // Make sure resources exist.
+            if (metadata[&quot;resources&quot;] == null)
+            {
+                metadata[&quot;resources&quot;] = new JObject();
+            }
+
+            // Only pre-fill version info if there&#39;s none already. GH #199
+            if ((string) metadata[&quot;ksp_version_min&quot;] == null &amp;&amp; (string) metadata[&quot;ksp_version_max&quot;] == null)
+            {
+                // Inflate won&#39;t overwrite an existing key, so we don&#39;t need to check
+                // for ksp_version itself. :)
+                log.Debug(&quot;Pre-filling KSP version field&quot;);
+                Inflate(metadata, &quot;ksp_version&quot;, version.KSP_version.ToString());
+            }
+
+            Inflate(metadata, &quot;name&quot;, name);
+            Inflate(metadata, &quot;license&quot;, license);
+            Inflate(metadata, &quot;abstract&quot;, short_description);
+            Inflate(metadata, &quot;author&quot;, author);
+
+            if (version.friendly_version.EpochPart == 0 &amp;&amp; metadata[&quot;x_netkan_force_epoch&quot;] != null)
+            {
+                var epoch = int.Parse(metadata[&quot;x_netkan_force_epoch&quot;].ToString());
+                Inflate(metadata, &quot;version&quot;, String.Format(&quot;{0}:{1}&quot;, epoch, version.ToString()));
+            }
+            else
+            {
+                Inflate(metadata, &quot;version&quot;, version.friendly_version.ToString());
+            }
+
+            Inflate(metadata, &quot;download&quot;, version.download_path.OriginalString);
+            Inflate(metadata, &quot;x_generated_by&quot;, &quot;netkan&quot;);
+            Inflate(metadata, &quot;download_size&quot;, download_size);
+
+            if (website != null)
+            {
+                Inflate((JObject)metadata[&quot;resources&quot;], &quot;homepage&quot;, Escape(website));
+            }
+
+            Inflate((JObject) metadata[&quot;resources&quot;], &quot;kerbalstuff&quot;, KSHome().OriginalString);
+        }
+
+        internal KSVersion Latest()
+        {
+            // The version we want is specified by `default_version_id`, it&#39;s not just
+            // the latest. See GH #214. Thanks to @Starstrider42 for spotting this.
+
+            var latest =
+                from release in versions
+                where release.id == default_version_id
+                select release
+            ;
+
+            // There should only ever be one.
+            return latest.First();
+        }
+
+        /// &lt;summary&gt;
+        /// Provide an escaped version of the given URL, including converting
+        /// square brackets to their escaped forms.
+        /// &lt;/summary&gt;
+        private static string Escape(Uri url)
+        {
+            if (url == null)
+            {
+                return null;
+            }
+
+            log.DebugFormat(&quot;Escaping {0}&quot;, url);
+
+            string escaped = Uri.EscapeUriString(url.ToString());
+
+            // Square brackets are &quot;reserved characters&quot; that should not appear
+            // in strings to begin with, so C# doesn&#39;t try to escape them in case
+            // they&#39;re being used in a special way. They&#39;re not; some mod authors
+            // just have crazy ideas as to what should be in a URL, and KS doesn&#39;t
+            // escape them in its API. There&#39;s probably more in RFC 3986.
+
+            escaped = escaped.Replace(&quot;[&quot;,Uri.HexEscape(&#39;[&#39;));
+            escaped = escaped.Replace(&quot;]&quot;,Uri.HexEscape(&#39;]&#39;));
+
+            // Make sure we have a &quot;http://&quot; or &quot;https://&quot; start.
+            if (!Regex.IsMatch(escaped, &quot;(?i)^(http|https)://&quot;))
+            {
+                // Prepend &quot;http://&quot;, as we do not know if the site supports https.
+                escaped = &quot;http://&quot; + escaped;
+            }
+
+            log.DebugFormat(&quot;Escaped to {0}&quot;, escaped);
+
+            return escaped;
+        }
+        
+        /// &lt;summary&gt;
+        /// Returns the path to the mod&#39;s home on KerbalStuff
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The home.&lt;/returns&gt;
+        internal Uri KSHome()
+        {
+            return KSAPI.ExpandPath(String.Format(&quot;/mod/{0}/{1}&quot;, id, name));
+        }
+
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[25,9,25,10,0],[26,13,26,47,0],[27,9,27,10,0],[34,9,34,10,0],[35,13,35,46,0],[37,13,37,70,0],[40,13,40,67,0],[43,13,43,47,0],[44,13,44,14,0],[45,17,45,55,0],[46,13,46,14,0],[49,13,49,110,0],[50,13,50,14,0],[53,17,53,60,0],[54,17,54,82,0],[55,13,55,14,0],[57,13,57,45,0],[58,13,58,51,0],[59,13,59,62,0],[60,13,60,49,0],[62,13,62,101,0],[63,13,63,14,0],[64,17,64,84,0],[65,17,65,99,0],[66,13,66,14,0],[68,13,68,14,0],[69,17,69,83,0],[70,13,70,14,0],[72,13,72,81,0],[73,13,73,59,0],[74,13,74,63,0],[76,13,76,33,0],[77,13,77,14,0],[78,17,78,86,0],[79,13,79,14,0],[81,13,81,94,0],[82,9,82,10,0],[85,9,85,10,0],[89,13,91,23,0],[91,55,93,14,0],[96,13,96,35,0],[97,9,97,10,0],[104,9,104,10,0],[105,13,105,29,0],[106,13,106,14,0],[107,17,107,29,0],[110,13,110,50,0],[112,13,112,66,0],[120,13,120,63,0],[121,13,121,63,0],[124,13,124,65,0],[125,13,125,14,0],[127,17,127,47,0],[128,13,128,14,0],[130,13,130,56,0],[132,13,132,28,0],[133,9,133,10,0],[140,9,140,10,0],[141,13,141,78,0],[142,9,142,10,0],[12,9,12,81,0],[91,23,91,55,0]]);
+    </script>
+  </body>
+</html>

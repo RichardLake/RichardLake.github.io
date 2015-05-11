@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\tests\ckan\net\net.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.IO;
+using CKAN;
+using NUnit.Framework;
+using CurlSharp;
+
+namespace CKANTests
+{
+    [TestFixture]
+    public class Net
+    {
+        // TODO: Test certificate errors. How?
+        // URL we expect to always be up.
+        const string KNOWN_URL = &quot;http://example.com/&quot;;
+        private void BadDownload()
+        {
+            CKAN.Net.Download(&quot;cheese sandwich&quot;);
+        }
+
+        [Test]
+        [Category(&quot;Online&quot;)]
+        public void DownloadThrowsOnInvaildURL()
+        {
+            // Download should throw an exception on an invalid URL.
+            Assert.That(BadDownload, Throws.Exception);
+        }
+
+        [Test]
+        [Category(&quot;Online&quot;)]
+        public void DownloadReturnsSavefileNameAndSavefileExists()
+        {
+            // Two-argument test, should save to the file we supply
+            string savefile = &quot;example.txt&quot;;
+            string downloaded = CKAN.Net.Download(KNOWN_URL, savefile);
+            Assert.AreEqual(downloaded, savefile);
+            Assert.That(File.Exists(savefile));
+            File.Delete(savefile);
+        }
+
+        [Test]
+        [Category(&quot;Online&quot;)]
+        public void SingleArgumentDownloadSavesToTemporaryFile()
+        {
+            string downloaded = CKAN.Net.Download(KNOWN_URL);
+            Assert.That(File.Exists(downloaded));
+            File.Delete(downloaded);
+        }
+
+        [Test]
+        [Category(&quot;Online&quot;)]
+        public void KerbalStuffSSL()
+        {
+            Assert.DoesNotThrow(delegate
+            {
+                string file = CKAN.Net.Download(&quot;https://kerbalstuff.com/mod/646/Contract%20Reward%20Modifier/download/1.2&quot;);
+                if (!File.Exists(file))
+                {
+                    throw new Exception(&quot;File not downloaded&quot;);
+                }
+            });
+        }
+            
+        [Test]
+        [Category(&quot;Security&quot;)]
+        public void SSLenforced()
+        {
+            // We don&#39;t use curl on Windows, and so we just skip
+            // this test on that platform.
+            if (Platform.IsWindows) return;
+
+            var curl = CKAN.Curl.CreateEasy(&quot;https://example.com&quot;, (FileStream) null);
+            Assert.IsTrue(curl.SslVerifyPeer, &quot;We should enforce SSL&quot;);
+        }
+
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[18,9,18,10,0],[71,13,71,87,0],[72,13,72,72,0],[57,17,57,18,0],[16,9,16,10,1],[17,13,17,50,1],[23,9,23,10,1],[25,13,25,56,1],[26,9,26,10,1],[31,9,31,10,1],[33,13,33,45,1],[34,13,34,72,1],[35,13,35,51,1],[36,13,36,48,1],[37,13,37,35,1],[38,9,38,10,1],[43,9,43,10,1],[44,13,44,62,1],[45,13,45,50,1],[46,13,46,37,1],[47,9,47,10,1],[52,9,52,10,1],[53,13,54,13,1],[54,14,55,17,1],[55,126,56,17,1],[56,40,57,17,1],[57,18,58,21,1],[58,64,60,13,1],[60,14,60,16,1],[61,9,61,10,1],[66,9,66,10,1],[69,13,69,36,1],[69,37,69,44,1],[73,9,73,10,1],[54,13,54,14,1],[55,17,55,126,1],[56,17,56,40,1],[58,21,58,64,1],[60,13,60,14,1]]);
+    </script>
+  </body>
+</html>

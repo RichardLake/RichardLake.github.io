@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\errordialog.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Windows.Forms;
+using log4net;
+
+namespace CKAN
+{
+
+    public partial class ErrorDialog : FormCompatibility
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof(ErrorDialog));
+
+        public ErrorDialog()
+        {
+            InitializeComponent();
+            ApplyFormCompatibilityFixes();
+            StartPosition = FormStartPosition.CenterScreen;
+        }
+
+        public void ShowErrorDialog(string text, params object[] args)
+        {
+            if (Main.Instance.InvokeRequired)
+            {
+                Main.Instance.Invoke(new MethodInvoker(() =&gt; ShowErrorDialog(text, args)));
+            }
+            else
+            {
+                log.ErrorFormat(text, args);
+                ErrorMessage.Text = String.Format(text, args);
+                ShowDialog();
+            }
+        }
+
+        public void HideErrorDialog()
+        {
+            Util.Invoke(this, () =&gt; Close());
+        }
+
+        private void DismissButton_Click(object sender, EventArgs e)
+        {
+            Close();
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[12,9,12,29,0],[13,9,13,10,0],[14,13,14,35,0],[15,13,15,43,0],[16,13,16,60,0],[17,9,17,10,0],[20,9,20,10,0],[21,13,21,46,0],[22,13,22,14,0],[23,17,23,62,0],[23,89,23,92,0],[24,13,24,14,0],[26,13,26,14,0],[27,17,27,45,0],[28,17,28,63,0],[29,17,29,30,0],[30,13,30,14,0],[31,9,31,10,0],[34,9,34,10,0],[35,13,35,37,0],[35,44,35,46,0],[36,9,36,10,0],[39,9,39,10,0],[40,13,40,21,0],[41,9,41,10,0],[10,9,10,86,0],[35,37,35,44,0],[23,62,23,89,0]]);
+    </script>
+  </body>
+</html>

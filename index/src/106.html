@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-cmdline\main.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Reference CKAN client
+// Paul &#39;@pjf&#39; Fenwick
+//
+// License: CC-BY 4.0, LGPL, or MIT (your choice)
+
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using log4net;
+using log4net.Config;
+using log4net.Core;
+
+namespace CKAN.CmdLine
+{
+    internal class MainClass
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof (MainClass));
+
+        /*
+         * When the STAThread is applied, it changes the apartment state of the current thread to be single threaded. 
+         * Without getting into a huge discussion about COM and threading,
+         * this attribute ensures the communication mechanism between the current thread an
+         * other threads that may want to talk to it via COM.  When you&#39;re using Windows Forms,
+         * depending on the feature you&#39;re using, it may be using COM interop in order to communicate with
+         * operating system components.  Good examples of this are the Clipboard and the File Dialogs. 
+         */
+        [STAThread]
+        public static int Main(string[] args)
+        {
+            BasicConfigurator.Configure();
+            LogManager.GetRepository().Threshold = Level.Warn;
+            log.Debug(&quot;CKAN started&quot;);
+
+            Options cmdline;
+            IUser user = null;
+
+            // If we&#39;re starting with no options then invoke the GUI instead.
+            if (args.Length == 0)
+            {
+                return Gui(new GuiOptions(), args);
+            }
+
+            try
+            {
+                cmdline = new Options(args);
+            }
+            catch (BadCommandKraken)
+            {
+                // Our help screen will already be shown. Let&#39;s add some extra data.
+                user = new ConsoleUser(false);
+                user.RaiseMessage(&quot;You are using CKAN version {0}&quot;, Meta.Version());
+
+                return Exit.BADOPT;
+            }
+
+            // Process commandline options.
+
+            var options = (CommonOptions)cmdline.options;
+            user = new ConsoleUser(options.Headless);
+            CheckMonoVersion(user, 3, 1, 0);
+
+            if ((Platform.IsUnix || Platform.IsMac) &amp;&amp; CmdLineUtil.GetUID() == 0)
+            {
+                if (!options.AsRoot)
+                {
+                    user.RaiseError(@&quot;You are trying to run CKAN as root. 
+This is a bad idea and there is absolutely no good reason to do it. Please run CKAN from a user account (or use --asroot if you are feeling brave).&quot;);
+                    return Exit.ERROR;
+                }
+                else
+                {
+                    user.RaiseMessage(&quot;Warning: Running CKAN as root!&quot;);
+                }
+            }
+
+            if (options.Debug)
+            {
+                LogManager.GetRepository().Threshold = Level.Debug;
+                log.Info(&quot;Debug logging enabled&quot;);
+            }
+            else if (options.Verbose)
+            {
+                LogManager.GetRepository().Threshold = Level.Info;
+                log.Info(&quot;Verbose logging enabled&quot;);
+            }
+
+            // Assign user-agent string if user has given us one
+            if (options.NetUserAgent != null)
+            {
+                Net.UserAgentString = options.NetUserAgent;
+            }
+
+            // TODO: Allow the user to specify just a directory.
+            // User provided KSP instance
+
+            if (options.KSPdir != null &amp;&amp; options.KSP != null)
+            {
+                user.RaiseMessage(&quot;--ksp and --kspdir can&#39;t be specified at the same time&quot;);
+                return Exit.BADOPT;
+            }
+            KSPManager manager= new KSPManager(user);
+            if (options.KSP != null)
+            {
+                // Set a KSP directory by its alias.
+
+                try
+                {
+                    manager.SetCurrentInstance(options.KSP);
+                }
+                catch (InvalidKSPInstanceKraken)
+                {
+                    user.RaiseMessage(&quot;Invalid KSP installation specified \&quot;{0}\&quot;, use &#39;--kspdir&#39; to specify by path, or &#39;list-installs&#39; to see known KSP installations&quot;, options.KSP);
+                    return Exit.BADOPT;
+                }
+            }
+            else if (options.KSPdir != null)
+            {
+                // Set a KSP directory by its path
+
+                manager.SetCurrentInstanceByPath(options.KSPdir);
+            }
+            else if (! (cmdline.action == &quot;ksp&quot; || cmdline.action == &quot;version&quot;))
+            {
+                // Find whatever our preferred instance is.
+                // We don&#39;t do this on `ksp/version` commands, they don&#39;t need it.
+                CKAN.KSP ksp = manager.GetPreferredInstance();
+
+                if (ksp == null)
+                {
+                    user.RaiseMessage(&quot;I don&#39;t know where KSP is installed.&quot;);
+                    user.RaiseMessage(&quot;Use &#39;ckan ksp help&#39; for assistance on setting this.&quot;);
+                    return Exit.ERROR;
+                }
+                else
+                {
+                    log.InfoFormat(&quot;Using KSP install at {0}&quot;,ksp.GameDir());
+                }
+            }
+
+            #region Aliases
+
+            switch (cmdline.action)
+            {
+                case &quot;add&quot;:
+                    cmdline.action = &quot;install&quot;;
+                    break;
+
+                case &quot;uninstall&quot;:
+                    cmdline.action = &quot;remove&quot;;
+                    break;
+
+                default:
+                    break;
+            } 
+
+            #endregion
+
+            switch (cmdline.action)
+            {
+                case &quot;gui&quot;:
+                    return Gui((GuiOptions)options, args);
+
+                case &quot;version&quot;:
+                    return Version(user);
+
+                case &quot;update&quot;:
+                    return (new Update(user)).RunCommand(manager.CurrentInstance, (UpdateOptions)cmdline.options);
+
+                case &quot;available&quot;:
+                    return Available(manager.CurrentInstance, user);
+
+                case &quot;install&quot;:
+                    Scan(manager.CurrentInstance);
+                    return (new Install(user)).RunCommand(manager.CurrentInstance, (InstallOptions)cmdline.options);
+
+                case &quot;scan&quot;:
+                    return Scan(manager.CurrentInstance);
+
+                case &quot;list&quot;:
+                    return (new List(user)).RunCommand(manager.CurrentInstance, (ListOptions)cmdline.options);
+
+                case &quot;show&quot;:
+                    return (new Show(user)).RunCommand(manager.CurrentInstance, (ShowOptions)cmdline.options);
+
+                case &quot;search&quot;:
+                    return (new Search(user)).RunCommand(manager.CurrentInstance, options);
+
+                case &quot;remove&quot;:
+                    return (new Remove(user)).RunCommand(manager.CurrentInstance, cmdline.options);
+
+                case &quot;upgrade&quot;:
+                    Scan(manager.CurrentInstance);
+                    return (new Upgrade(user)).RunCommand(manager.CurrentInstance, cmdline.options);
+
+                case &quot;clean&quot;:
+                    return Clean(manager.CurrentInstance);
+
+                case &quot;repair&quot;:
+                    var repair = new Repair(manager.CurrentInstance,user);
+                    return repair.RunSubCommand((SubCommandOptions) cmdline.options);
+
+                case &quot;ksp&quot;:
+                    var ksp = new KSP(manager, user);
+                    return ksp.RunSubCommand((SubCommandOptions) cmdline.options);
+
+                case &quot;repo&quot;:
+                    var repo = new Repo (manager, user);
+                    return repo.RunSubCommand((SubCommandOptions) cmdline.options);
+
+                default:
+                    user.RaiseMessage(&quot;Unknown command, try --help&quot;);
+                    return Exit.BADOPT;
+            }
+        }
+
+        private static void CheckMonoVersion(IUser user, int rec_major, int rec_minor, int rec_patch)
+        {
+            try
+            {
+                Type type = Type.GetType(&quot;Mono.Runtime&quot;);
+                if (type == null) return;
+
+                MethodInfo display_name = type.GetMethod(&quot;GetDisplayName&quot;, BindingFlags.NonPublic | BindingFlags.Static);
+                if (display_name != null)
+                {                    
+                    var version_string = (string) display_name.Invoke(null, null);
+                    var match = Regex.Match(version_string, @&quot;^\D*(?&lt;major&gt;[\d]+)\.(?&lt;minor&gt;\d+)\.(?&lt;revision&gt;\d+).*$&quot;);
+                    
+                    if (match.Success)
+                    {                        
+                        int major = Int32.Parse(match.Groups[&quot;major&quot;].Value);
+                        int minor = Int32.Parse(match.Groups[&quot;minor&quot;].Value);
+                        int patch = Int32.Parse(match.Groups[&quot;revision&quot;].Value);
+                        
+                        if (major &lt; rec_major || (major == rec_major &amp;&amp; minor &lt; rec_minor))
+                        {
+                            user.RaiseMessage(
+                                &quot;Warning. Detected mono runtime of {0} is less than the recommended version of {1}\n&quot;,
+                                String.Join(&quot;.&quot;, major, minor, patch),
+                                String.Join(&quot;.&quot;, rec_major, rec_minor, rec_patch)
+                                );
+                            user.RaiseMessage(&quot;Update recommend\n&quot;);
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Ignored. This may be fragile and is just a warning method
+            }
+        }
+
+        private static int Gui(GuiOptions options, string[] args)
+        {
+            // TODO: Sometimes when the GUI exits, we get a System.ArgumentException,
+            // but trying to catch it here doesn&#39;t seem to help. Dunno why.
+
+            GUI.Main_(args, options.ShowConsole);
+
+            return Exit.OK;
+        }
+
+        private static int Version(IUser user)
+        {
+            user.RaiseMessage(Meta.Version());
+
+            return Exit.OK;
+        }
+
+        private static int Available(CKAN.KSP current_instance, IUser user)
+        {
+            List&lt;CkanModule&gt; available = RegistryManager.Instance(current_instance).registry.Available(current_instance.Version());
+
+            user.RaiseMessage(&quot;Mods available for KSP {0}&quot;, current_instance.Version());
+            user.RaiseMessage(&quot;&quot;);
+
+            var width = user.WindowWidth;
+
+            foreach (CkanModule module in available)
+            {
+                string entry = String.Format(&quot;* {0} ({1}) - {2}&quot;, module.identifier, module.version, module.name);
+                user.RaiseMessage(width &gt; 0 ? entry.PadRight(width).Substring(0, width - 1) : entry);
+            }
+
+            return Exit.OK;
+        }
+
+        private static int Scan(CKAN.KSP current_instance)
+        {
+            current_instance.ScanGameData();
+            return Exit.OK;
+        }
+
+        private static int Clean(CKAN.KSP current_instance)
+        {
+            current_instance.CleanCache();
+            return Exit.OK;
+        }
+    }
+
+    public class CmdLineUtil
+    {
+        public static uint GetUID()
+        {
+            if (Platform.IsUnix || Platform.IsMac)
+            {
+                return getuid();
+            }
+
+            return 1;
+        }
+
+        [DllImport(&quot;libc&quot;)]
+        private static extern uint getuid();
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,13,33,43,0],[34,13,34,63,0],[35,13,35,39,0],[38,13,38,31,0],[41,13,41,34,0],[43,17,43,52,0],[48,17,48,45,0],[49,13,49,14,0],[50,13,50,37,0],[53,17,53,47,0],[54,17,54,85,0],[56,17,56,36,0],[61,13,61,58,0],[62,13,62,54,0],[63,13,63,45,0],[65,13,65,82,0],[67,17,67,37,0],[69,21,70,151,0],[71,21,71,39,0],[75,21,75,73,0],[79,13,79,31,0],[81,17,81,68,0],[82,17,82,51,0],[83,13,83,14,0],[84,18,84,38,0],[86,17,86,67,0],[87,17,87,53,0],[91,13,91,46,0],[93,17,93,60,0],[99,13,99,63,0],[101,17,101,93,0],[102,17,102,36,0],[104,13,104,54,0],[105,13,105,37,0],[111,21,111,61,0],[112,17,112,18,0],[113,17,113,49,0],[115,21,115,184,0],[116,21,116,40,0],[119,18,119,45,0],[123,17,123,66,0],[124,13,124,14,0],[125,18,125,81,0],[129,17,129,63,0],[131,17,131,33,0],[133,21,133,79,0],[134,21,134,94,0],[135,21,135,39,0],[139,21,139,78,0],[145,13,145,36,0],[148,21,148,48,0],[149,21,149,27,0],[152,21,152,47,0],[161,13,161,36,0],[164,21,164,59,0],[167,21,167,42,0],[170,21,170,115,0],[173,21,173,69,0],[176,21,176,51,0],[177,21,177,117,0],[180,21,180,58,0],[183,21,183,111,0],[186,21,186,111,0],[189,21,189,92,0],[192,21,192,100,0],[195,21,195,51,0],[196,21,196,101,0],[199,21,199,59,0],[202,21,202,75,0],[203,21,203,86,0],[206,21,206,54,0],[207,21,207,83,0],[210,21,210,57,0],[211,21,211,84,0],[214,21,214,70,0],[215,21,215,40,0],[217,9,217,10,0],[223,17,223,58,0],[224,17,224,34,0],[224,35,224,42,0],[226,17,226,122,0],[227,17,227,42,0],[229,21,229,83,0],[230,21,230,121,0],[232,21,232,39,0],[234,25,234,78,0],[235,25,235,78,0],[236,25,236,81,0],[238,25,238,92,0],[240,29,244,35,0],[245,29,245,69,0],[249,13,249,14,0],[250,13,250,30,0],[253,13,253,14,0],[254,9,254,10,0],[261,13,261,50,0],[263,13,263,28,0],[268,13,268,47,0],[270,13,270,28,0],[275,13,275,132,0],[277,13,277,89,0],[278,13,278,35,0],[280,13,280,42,0],[282,43,282,52,0],[282,22,282,39,0],[284,17,284,115,0],[285,17,285,102,0],[282,40,282,42,0],[288,13,288,28,0],[293,13,293,45,0],[294,13,294,28,0],[299,13,299,43,0],[300,13,300,28,0],[20,9,20,85,0],[308,13,308,51,0],[310,17,310,33,0],[313,13,313,22,0]]);
+    </script>
+  </body>
+</html>

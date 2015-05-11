@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\net\curl.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.IO;
+using CurlSharp;
+using log4net;
+
+
+namespace CKAN
+{
+    /// &lt;summary&gt;
+    /// Utility layer on top of curlsharp for common operations.
+    /// &lt;/summary&gt;
+    public static class Curl
+    {
+        private static bool init_complete = false;
+        private static readonly ILog log = LogManager.GetLogger(typeof (Curl));
+
+        /// &lt;summary&gt;
+        /// Has libcurl do all the work it needs to work correctly.
+        /// NOT THREADSAFE AT ALL. Do this before forking any threads!
+        /// &lt;/summary&gt;
+        public static void Init()
+        {
+            if (init_complete)
+            {
+                log.Info(&quot;Curl init already performed, not running twice&quot;);
+                return;
+            }
+            CurlSharp.Curl.GlobalInit(CurlInitFlag.All);
+            init_complete = true;
+        }
+
+        /// &lt;summary&gt;
+        /// Release any resources used by libcurl. NOT THREADSAFE AT ALL.
+        /// Do this after all other threads are done. 
+        /// &lt;/summary&gt;
+        public static void CleanUp()
+        {
+            CurlSharp.Curl.GlobalCleanup();
+            init_complete = false;
+        }
+
+
+
+        /// &lt;summary&gt;
+        /// Creates a CurlEasy object that calls the given writeback function
+        /// when data is received.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The CurlEasy obect&lt;/returns&gt;
+        /// 
+        /// Adapted from MultiDemo.cs in the curlsharp repo
+        public static CurlEasy CreateEasy(string url, CurlWriteCallback wf)
+        {
+            if (!init_complete)
+            {
+                log.Warn(&quot;Curl environment not pre-initialised, performing non-threadsafe init.&quot;);
+                Init();
+            }
+
+            var easy = new CurlEasy();
+            easy.Url = url;
+            easy.WriteData = null;
+            easy.WriteFunction = wf;
+            easy.Encoding = &quot;deflate, gzip&quot;;
+            easy.FollowLocation = true; // Follow redirects
+            easy.UserAgent = Net.UserAgentString;
+            easy.SslVerifyPeer = true;
+
+            // ksp.sarbian.com uses a SSL cert that libcurl can&#39;t
+            // verify, so we skip verification. Yeah, that sucks, I know,
+            // but this sucks less than our previous solution that disabled
+            // SSL checking entirely.
+
+            if (url.StartsWith(&quot;https://ksp.sarbian.com/&quot;))
+            {
+                easy.SslVerifyPeer = false;
+            }
+
+            return easy;
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a CurlEasy object that writes to the given stream.
+        /// &lt;/summary&gt;
+        public static CurlEasy CreateEasy(string url, FileStream stream)
+        {
+            // Let&#39;s make a happy closure around this stream!
+            return CreateEasy(url, delegate(byte[] buf, int size, int nmemb, object extraData)
+            {
+                stream.Write(buf, 0, size * nmemb);
+                return size * nmemb;
+            });
+        }
+
+        public static CurlEasy CreateEasy(Uri url, FileStream stream)
+        {
+            // Curl interacts poorly with KS for some (but not all) modules unless
+            // the original string is used, hence .OriginalString rather than .ToString
+            // here.
+            return CreateEasy(url.OriginalString, stream);
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[24,13,24,14,0],[25,17,25,76,0],[26,17,26,24,0],[29,13,29,34,0],[30,9,30,10,0],[37,9,37,10,0],[38,13,38,44,0],[39,13,39,35,0],[40,9,40,10,0],[52,9,52,10,0],[53,13,53,32,0],[54,13,54,14,0],[55,17,55,99,0],[56,17,56,24,0],[57,13,57,14,0],[59,13,59,39,0],[60,13,60,28,0],[61,13,61,35,0],[62,13,62,37,0],[63,13,63,45,0],[64,13,64,40,0],[65,13,65,50,0],[66,13,66,39,0],[73,13,73,60,0],[74,13,74,14,0],[75,17,75,44,0],[76,13,76,14,0],[78,13,78,25,0],[79,9,79,10,0],[85,9,85,10,0],[87,13,88,13,0],[88,14,89,17,0],[89,52,90,17,0],[90,37,91,13,0],[91,14,91,16,0],[92,9,92,10,0],[95,9,95,10,0],[99,13,99,59,0],[100,9,100,10,0],[88,13,88,14,0],[89,17,89,52,0],[90,17,90,37,0],[91,13,91,14,0],[22,9,22,10,1],[23,13,23,31,1],[28,13,28,57,1],[14,9,14,51,1],[15,9,15,80,1]]);
+    </script>
+  </body>
+</html>

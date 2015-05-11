@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-cmdline\action\show.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using log4net;
+
+namespace CKAN.CmdLine
+{
+    public class Show : ICommand
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof(Show));
+
+        public IUser user { get; set; }
+
+        public Show(IUser user)
+        {
+            this.user = user;
+        }
+
+        public int RunCommand(CKAN.KSP ksp, object raw_options)
+        {
+            ShowOptions options = (ShowOptions) raw_options;
+
+            if (options.Modname == null)
+            {
+                // empty argument
+                user.RaiseMessage(&quot;show &lt;module&gt; - module name argument missing, perhaps you forgot it?&quot;);
+                return Exit.BADOPT;
+            }
+
+            // Find the module: either by &quot;name&quot; (the user-friendly display name) or by identifier
+            CkanModule moduleToShow = ksp.Registry                  
+                                      .Available(ksp.Version())
+                                      .SingleOrDefault(
+                                            mod =&gt; mod.name == options.Modname
+                                                || mod.identifier == options.Modname
+                                      );
+                
+            if (moduleToShow == null)
+            {
+                // No exact match found. Try to look for a close match.
+                user.RaiseMessage(&quot;{0} not found.&quot;, options.Modname);
+                user.RaiseMessage(&quot;Looking for close matches.&quot;);
+
+                Search search = new Search(user);
+                List&lt;CkanModule&gt; matches = search.PerformSearch(ksp, options.Modname);
+
+                // Display the results of the search.
+                if (matches.Count == 0)
+                {
+                    // No matches found.
+                    user.RaiseMessage(&quot;No close matches found.&quot;);
+                    return Exit.BADOPT;
+                }
+                else if (matches.Count == 1)
+                {
+                    // If there is only 1 match, display it.
+                    user.RaiseMessage(&quot;Found 1 close match: {0}&quot;, matches[0].name);
+                    user.RaiseMessage(&quot;&quot;);
+
+                    moduleToShow = matches[0];
+                }
+                else
+                {
+                    // Display the found close matches.
+                    string[] strings_matches = new string[matches.Count];
+
+                    for (int i = 0; i &lt; matches.Count; i++)
+                    {
+                        strings_matches[i] = matches[i].name;
+                    }
+
+                    int selection = user.RaiseSelectionDialog(&quot;Close matches&quot;, strings_matches);
+
+                    if (selection &lt; 0)
+                    {
+                        return Exit.BADOPT;
+                    }
+
+                    // Mark the selection as the one to show.
+                    moduleToShow = matches[selection];
+                }
+            }
+
+            // If the selected module is installed, we have additional data to show. First, check if the module is installed.
+            InstalledModule installedModuleToShow = ksp.Registry.InstalledModule(moduleToShow.identifier);
+
+            // If the module is installed (not null), show it. Else, show the generic information.
+            if (installedModuleToShow != null)
+            {
+                return ShowMod(installedModuleToShow);
+            }
+
+            return ShowMod(moduleToShow);
+        }
+
+        /// &lt;summary&gt;
+        /// Shows information about the mod.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Success status.&lt;/returns&gt;
+        /// &lt;param name=&quot;module&quot;&gt;The module to show.&lt;/param&gt;
+        public int ShowMod(InstalledModule module)
+        {
+            // Display the basic info.
+            int return_value = ShowMod(module.Module);
+
+            // Display InstalledModule specific information.
+            ICollection&lt;string&gt; files = module.Files as ICollection&lt;string&gt;;
+            if (files == null) throw new InvalidCastException();
+
+            user.RaiseMessage(&quot;\nShowing {0} installed files:&quot;, files.Count);
+            foreach (string file in files)
+            {
+                user.RaiseMessage(&quot;- {0}&quot;, file);
+            }
+
+            return return_value;
+        }
+
+        /// &lt;summary&gt;
+        /// Shows information about the mod.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Success status.&lt;/returns&gt;
+        /// &lt;param name=&quot;module&quot;&gt;The module to show.&lt;/param&gt;
+        public int ShowMod(Module module)
+        {
+            #region Abstract and description
+            if (!string.IsNullOrEmpty(module.@abstract))
+            {
+                user.RaiseMessage(&quot;{0}: {1}&quot;, module.name, module.@abstract);
+            }
+            else
+            {
+                user.RaiseMessage(&quot;{0}&quot;, module.name);
+            }
+
+            if (!string.IsNullOrEmpty(module.description))
+            {
+                user.RaiseMessage(&quot;\n{0}\n&quot;, module.description);
+            }
+            #endregion
+
+            #region General info (author, version...)
+            user.RaiseMessage(&quot;\nModule info:&quot;);
+            user.RaiseMessage(&quot;- version:\t{0}&quot;, module.version);
+
+            if (module.author != null)
+            {
+                user.RaiseMessage(&quot;- authors:\t{0}&quot;, string.Join(&quot;, &quot;, module.author));
+            }
+            else
+            {
+                // Did you know that authors are optional in the spec?
+                // You do now. #673.
+                user.RaiseMessage(&quot;- authors:\tUNKNOWN&quot;);
+            }
+
+            user.RaiseMessage(&quot;- status:\t{0}&quot;, module.release_status);
+            user.RaiseMessage(&quot;- license:\t{0}&quot;, module.license); 
+            #endregion
+
+            #region Relationships
+            if (module.depends != null &amp;&amp; module.depends.Count &gt; 0)
+            {
+                user.RaiseMessage(&quot;\nDepends:&quot;);
+                foreach (RelationshipDescriptor dep in module.depends)
+                    user.RaiseMessage(&quot;- {0}&quot;, RelationshipToPrintableString(dep));
+            }
+
+            if (module.recommends != null &amp;&amp; module.recommends.Count &gt; 0)
+            {
+                user.RaiseMessage(&quot;\nRecommends:&quot;);
+                foreach (RelationshipDescriptor dep in module.recommends)
+                    user.RaiseMessage(&quot;- {0}&quot;, RelationshipToPrintableString(dep));
+            }
+
+            if (module.suggests != null &amp;&amp; module.suggests.Count &gt; 0)
+            {
+                user.RaiseMessage(&quot;\nSuggests:&quot;);
+                foreach (RelationshipDescriptor dep in module.suggests)
+                    user.RaiseMessage(&quot;- {0}&quot;, RelationshipToPrintableString(dep));
+            }
+
+            if (module.ProvidesList != null &amp;&amp; module.ProvidesList.Count &gt; 0)
+            {
+                user.RaiseMessage(&quot;\nProvides:&quot;);
+                foreach (string prov in module.ProvidesList)
+                    user.RaiseMessage(&quot;- {0}&quot;, prov);
+            } 
+            #endregion
+
+            user.RaiseMessage(&quot;\nResources:&quot;);
+            if (module.resources != null)
+            {
+                if (module.resources.bugtracker != null)
+                    user.RaiseMessage(&quot;- bugtracker: {0}&quot;, module.resources.bugtracker.ToString());
+                if (module.resources.homepage != null)
+                    user.RaiseMessage(&quot;- homepage: {0}&quot;, module.resources.homepage.ToString());
+                if (module.resources.kerbalstuff != null)
+                    user.RaiseMessage(&quot;- kerbalstuff: {0}&quot;, module.resources.kerbalstuff.ToString());
+                if (module.resources.repository != null)
+                    user.RaiseMessage(&quot;- repository: {0}&quot;, module.resources.repository.ToString());
+            }
+
+            return Exit.OK;
+        }
+
+        /// &lt;summary&gt;
+        /// Formats a RelationshipDescriptor into a user-readable string:
+        /// Name, version: x, min: x, max: x
+        /// &lt;/summary&gt;
+        private static string RelationshipToPrintableString(RelationshipDescriptor dep)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append(dep.name);
+            if (!string.IsNullOrEmpty(dep.version)) sb.Append(&quot;, version: &quot; + dep.version);
+            if (!string.IsNullOrEmpty(dep.min_version)) sb.Append(&quot;, min: &quot; + dep.version);
+            if (!string.IsNullOrEmpty(dep.max_version)) sb.Append(&quot;, max: &quot; + dep.version);
+            return sb.ToString();
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[14,29,14,33,0],[14,34,14,38,0],[16,9,16,32,0],[18,13,18,30,0],[19,9,19,10,0],[23,13,23,61,0],[25,13,25,41,0],[28,17,28,107,0],[29,17,29,36,0],[33,13,36,52,0],[37,85,38,41,0],[40,13,40,38,0],[43,17,43,70,0],[44,17,44,65,0],[46,17,46,50,0],[47,17,47,87,0],[50,17,50,40,0],[53,21,53,66,0],[54,21,54,40,0],[56,22,56,45,0],[59,21,59,84,0],[60,21,60,43,0],[62,21,62,47,0],[63,17,63,18,0],[67,21,67,74,0],[69,26,69,35,0],[71,25,71,62,0],[69,56,69,59,0],[69,37,69,54,0],[74,21,74,97,0],[76,21,76,39,0],[78,25,78,44,0],[82,21,82,55,0],[87,13,87,107,0],[90,13,90,47,0],[92,17,92,55,0],[95,13,95,42,0],[106,13,106,55,0],[109,13,109,77,0],[110,13,110,31,0],[110,32,110,65,0],[112,13,112,78,0],[113,37,113,42,0],[113,22,113,33,0],[115,17,115,50,0],[113,34,113,36,0],[118,13,118,33,0],[129,13,129,57,0],[131,17,131,78,0],[132,13,132,14,0],[135,17,135,55,0],[138,13,138,59,0],[140,17,140,66,0],[145,13,145,49,0],[146,13,146,66,0],[148,13,148,39,0],[150,17,150,88,0],[151,13,151,14,0],[156,17,156,58,0],[159,13,159,72,0],[160,13,160,66,0],[164,13,164,68,0],[166,17,166,49,0],[167,56,167,70,0],[167,26,167,52,0],[168,21,168,84,0],[167,53,167,55,0],[171,13,171,74,0],[173,17,173,52,0],[174,56,174,73,0],[174,26,174,52,0],[175,21,175,84,0],[174,53,174,55,0],[178,13,178,70,0],[180,17,180,50,0],[181,56,181,71,0],[181,26,181,52,0],[182,21,182,84,0],[181,53,181,55,0],[185,13,185,78,0],[187,17,187,50,0],[188,41,188,60,0],[188,26,188,37,0],[189,21,189,54,0],[188,38,188,40,0],[193,13,193,47,0],[194,13,194,42,0],[196,17,196,57,0],[197,21,197,100,0],[198,17,198,55,0],[199,21,199,96,0],[200,17,200,58,0],[201,21,201,102,0],[202,17,202,57,0],[203,21,203,100,0],[206,13,206,28,0],[215,13,215,52,0],[216,13,216,33,0],[217,13,217,52,0],[217,53,217,92,0],[218,13,218,56,0],[218,57,218,92,0],[219,13,219,56,0],[219,57,219,92,0],[220,13,220,34,0],[12,9,12,79,0],[36,52,37,85,0]]);
+    </script>
+  </body>
+</html>

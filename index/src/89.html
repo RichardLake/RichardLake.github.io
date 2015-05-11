@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\tests\ckan\ksp.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.IO;
+using CKAN;
+using NUnit.Framework;
+
+namespace CKANTests
+{
+    [TestFixture]
+    public class KSP
+    {
+        private CKAN.KSP ksp;
+        private string ksp_dir;
+
+        [SetUp]
+        public void Setup()
+        {
+            ksp_dir = Tests.TestData.NewTempDir();
+            Tests.TestData.CopyDirectory(Tests.TestData.good_ksp_dir(), ksp_dir);
+            ksp = new CKAN.KSP(ksp_dir,NullUser.User);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            Directory.Delete(ksp_dir, true);
+        }
+
+        [Test]
+        public void IsGameDir()
+        {
+            // Our test data directory should be good.
+            Assert.IsTrue(CKAN.KSP.IsKspDir(Tests.TestData.good_ksp_dir()));
+
+            // As should our copied folder.
+            Assert.IsTrue(CKAN.KSP.IsKspDir(ksp_dir));
+
+            // And the one from our KSP instance.
+            Assert.IsTrue(CKAN.KSP.IsKspDir(ksp.GameDir()));
+
+            // All these ones should be bad.
+            foreach (string dir in Tests.TestData.bad_ksp_dirs())
+            {
+                Assert.IsFalse(CKAN.KSP.IsKspDir(dir));
+            }
+        }
+
+        [Test]
+        public void Training()
+        {
+            //Use Uri to avoid issues with windows vs linux line seperators.
+            var canonicalPath = new Uri(Path.Combine(ksp_dir, &quot;saves&quot;, &quot;training&quot;)).LocalPath;
+            var training = new Uri(ksp.Tutorial()).LocalPath;
+            Assert.AreEqual(canonicalPath, training);
+        }
+
+        [Test]
+        public void ScanDlls()
+        {
+            string path = Path.Combine(ksp.GameData(), &quot;Example.dll&quot;);
+
+            Assert.IsFalse(ksp.Registry.IsInstalled(&quot;Example&quot;), &quot;Example should start uninstalled&quot;);
+
+            File.WriteAllText(path, &quot;Not really a DLL, are we?&quot;);
+
+            ksp.ScanGameData();
+
+            Assert.IsTrue(ksp.Registry.IsInstalled(&quot;Example&quot;), &quot;Example installed&quot;);
+
+            CKAN.Version version = ksp.Registry.InstalledVersion(&quot;Example&quot;);
+            Assert.IsInstanceOf&lt;DllVersion&gt;(version, &quot;DLL detected as a DLL, not full mod&quot;);
+
+            // Now let&#39;s do the same with different case.
+
+            string path2 = Path.Combine(ksp.GameData(), &quot;NewMod.DLL&quot;);
+
+            Assert.IsFalse(ksp.Registry.IsInstalled(&quot;NewMod&quot;));
+            File.WriteAllText(path2, &quot;This text is irrelevant. You will be assimilated&quot;);
+
+            ksp.ScanGameData();
+
+            Assert.IsTrue(ksp.Registry.IsInstalled(&quot;NewMod&quot;));
+        }
+
+        [Test]
+        public void ToAbsolute()
+        {
+            Assert.AreEqual(
+                CKAN.KSPPathUtils.NormalizePath(
+                    Path.Combine(ksp_dir, &quot;GameData/HydrazinePrincess&quot;)
+                ),
+                ksp.ToAbsoluteGameDir(&quot;GameData/HydrazinePrincess&quot;)
+            );
+        }
+
+        [Test]
+        public void ToRelative()
+        {
+            string absolute = Path.Combine(ksp_dir, &quot;GameData/HydrazinePrincess&quot;);
+
+            Assert.AreEqual(
+                &quot;GameData/HydrazinePrincess&quot;,
+                ksp.ToRelativeGameDir(absolute)
+            );
+        }
+
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[16,9,16,10,1],[17,13,17,51,1],[18,13,18,82,1],[19,13,19,55,1],[20,9,20,10,1],[24,9,24,10,1],[25,13,25,45,1],[26,9,26,10,1],[30,9,30,10,1],[32,13,32,77,1],[35,13,35,55,1],[38,13,38,61,1],[41,13,41,20,1],[41,36,41,65,1],[41,22,41,32,1],[42,13,42,14,1],[43,17,43,56,1],[44,13,44,14,1],[41,33,41,35,1],[45,9,45,10,1],[49,9,49,10,1],[51,13,51,95,1],[52,13,52,62,1],[53,13,53,54,1],[54,9,54,10,1],[58,9,58,10,1],[59,13,59,71,1],[61,13,61,101,1],[63,13,63,66,1],[65,13,65,32,1],[67,13,67,85,1],[69,13,69,77,1],[70,13,70,93,1],[74,13,74,71,1],[76,13,76,64,1],[77,13,77,90,1],[79,13,79,32,1],[81,13,81,63,1],[82,9,82,10,1],[86,9,86,10,1],[87,13,92,15,1],[93,9,93,10,1],[97,9,97,10,1],[98,13,98,83,1],[100,13,103,15,1],[104,9,104,10,1]]);
+    </script>
+  </body>
+</html>

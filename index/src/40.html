@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\aboutdialog.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Windows.Forms;
+
+namespace CKAN
+{
+    public partial class AboutDialog : FormCompatibility
+    {
+        public AboutDialog()
+        {
+            InitializeComponent();
+            ApplyFormCompatibilityFixes();
+            StartPosition = FormStartPosition.CenterScreen;
+        }
+
+        private void linkLabel1_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            System.Diagnostics.Process.Start(&quot;https://github.com/KSP-CKAN/CKAN/blob/master/LICENSE.md&quot;);
+        }
+
+        private void linkLabel2_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            System.Diagnostics.Process.Start(&quot;https://github.com/KSP-CKAN/CKAN/graphs/contributors&quot;);
+        }
+
+        private void linkLabel3_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            System.Diagnostics.Process.Start(&quot;https://github.com/KSP-CKAN/CKAN/&quot;);
+        }
+
+        private void linkLabel4_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            System.Diagnostics.Process.Start(&quot;http://forum.kerbalspaceprogram.com/threads/100067&quot;);
+        }
+
+        private void linkLabel5_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            System.Diagnostics.Process.Start(&quot;http://ksp-ckan.org&quot;);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[7,9,7,29,0],[8,9,8,10,0],[9,13,9,35,0],[10,13,10,43,0],[11,13,11,60,0],[12,9,12,10,0],[15,9,15,10,0],[16,13,16,105,0],[17,9,17,10,0],[20,9,20,10,0],[21,13,21,102,0],[22,9,22,10,0],[25,9,25,10,0],[26,13,26,83,0],[27,9,27,10,0],[30,9,30,10,0],[31,13,31,100,0],[32,9,32,10,0],[35,9,35,10,0],[36,13,36,69,0],[37,9,37,10,0]]);
+    </script>
+  </body>
+</html>

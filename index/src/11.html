@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\user.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Communicate with the user (status messages, yes/no questions, etc)
+// This class will proxy to either the GUI or cmdline functionality.
+
+using System;
+
+namespace CKAN
+{
+    public delegate int DisplaySelectionDialog(string message, params object[] args);
+    public delegate void DisplayMessage(string message, params object[] args);
+    public delegate bool DisplayYesNoDialog(string message);
+    public delegate void DisplayError(string message, params object[] args);
+    public delegate void ReportProgress(string format, int percent);
+    public delegate void DownloadsComplete(Uri[] urls, string[] filenames, Exception[] errors);
+
+    public interface IUser
+    {
+        event DisplayYesNoDialog AskUser;
+        event DisplaySelectionDialog AskUserForSelection;
+        event DisplayMessage Message;
+        event DisplayError Error;
+        event ReportProgress Progress;
+        event DownloadsComplete DownloadsComplete;
+        int WindowWidth { get; }
+        bool Headless { get; }
+
+        int RaiseSelectionDialog(string message, params object[] args);
+        void RaiseMessage(string message, params object[] url);
+        void RaiseProgress(string message, int percent);
+        bool RaiseYesNoDialog(string question);
+        void RaiseError(string message, params object[] args);
+        void RaiseDownloadsCompleted(Uri[] file_urls, string[] file_paths, Exception[] errors);
+    }
+
+    //Can be used in tests to supress output or as a base class for other types of user.
+    //It supplies no opp event handlers so that subclasses can avoid null checks. 
+    public class NullUser : IUser
+    {
+        public static readonly IUser User = new NullUser();
+
+        public NullUser()
+        {
+            AskUser += DisplayYesNoDialog;
+            AskUserForSelection += DisplaySelectionDialog;
+            Message += DisplayMessage;
+            Error += DisplayError;
+            Progress += ReportProgress;
+            DownloadsComplete += ReportDownloadsComplete;
+        }
+
+        public event DisplayYesNoDialog AskUser;
+        public event DisplaySelectionDialog AskUserForSelection;
+        public event DisplayMessage Message;
+        public event DisplayError Error;
+        public event ReportProgress Progress;
+        public event DownloadsComplete DownloadsComplete;
+
+        public virtual bool Headless
+        {
+            get { return false; }
+        }
+
+        protected virtual bool DisplayYesNoDialog(string message)
+        {
+            return true;
+        }
+
+        protected virtual void DisplayMessage(string message, params object[] args)
+        {
+        }
+
+        protected virtual int DisplaySelectionDialog(string message, params object[] args)
+        {
+            return 0;
+        }
+
+        protected virtual void DisplayError(string message, params object[] args)
+        {
+        }
+
+        protected virtual void ReportProgress(string format, int percent)
+        {
+        }
+        protected virtual void ReportDownloadsComplete(Uri[] urls, string[] filenames, Exception[] errors)
+        {
+        }
+
+        public virtual int WindowWidth
+        {
+            get { return -1; }
+        }
+
+        public void RaiseMessage(string message, params object[] url)
+        {
+            Message(message, url);
+        }
+
+        public void RaiseProgress(string message, int percent)
+        {
+            Progress(message, percent);
+        }
+
+        public bool RaiseYesNoDialog(string question)
+        {
+            //Return value will be from last handler added.
+            return AskUser(question);
+        }
+
+        public int RaiseSelectionDialog(string message, params object[] args)
+        {
+            return AskUserForSelection(message, args);
+        }
+
+        public void RaiseError(string message, params object[] args)
+        {
+            Error(message, args);
+        }
+
+        public void RaiseDownloadsCompleted(Uri[] file_urls, string[] file_paths, Exception[] errors)
+        {
+            DownloadsComplete(file_urls, file_paths, errors);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[59,17,59,18,0],[59,19,59,32,0],[59,33,59,34,0],[72,9,72,10,0],[73,13,73,22,0],[74,9,74,10,0],[77,9,77,10,0],[78,9,78,10,0],[84,9,84,10,0],[85,9,85,10,0],[89,17,89,18,0],[89,19,89,29,0],[89,30,89,31,0],[109,9,109,10,0],[110,13,110,55,0],[111,9,111,10,0],[114,9,114,10,0],[115,13,115,34,0],[116,9,116,10,0],[119,9,119,10,0],[120,13,120,62,0],[121,9,121,10,0],[40,9,40,26,1],[41,9,41,10,1],[42,13,42,43,1],[43,13,43,59,1],[44,13,44,39,1],[45,13,45,35,1],[46,13,46,40,1],[47,13,47,58,1],[48,9,48,10,1],[63,9,63,10,1],[64,13,64,25,1],[65,9,65,10,1],[68,9,68,10,1],[69,9,69,10,1],[81,9,81,10,1],[82,9,82,10,1],[93,9,93,10,1],[94,13,94,35,1],[95,9,95,10,1],[98,9,98,10,1],[99,13,99,40,1],[100,9,100,10,1],[103,9,103,10,1],[105,13,105,38,1],[106,9,106,10,1],[38,9,38,60,1]]);
+    </script>
+  </body>
+</html>

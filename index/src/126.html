@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\github\githubrelease.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.IO;
+using System.Linq;
+using log4net;
+using Newtonsoft.Json.Linq;
+
+namespace CKAN.NetKAN
+{
+    /// &lt;summary&gt;
+    /// A simple class to pull the relevant details out of a Github release.
+    /// For gh2ckan. :)
+    /// &lt;/summary&gt;
+    public class GithubRelease : CkanInflator
+    {
+        public Version version;
+        public Uri download;
+        public long size;
+        public string author;
+
+        private static readonly ILog log = LogManager.GetLogger(typeof (GithubRelease));
+
+        public GithubRelease (JObject parsed_json, JObject asset)
+        {
+            version  = new Version( parsed_json[&quot;tag_name&quot;].ToString() );
+            author   = parsed_json[&quot;author&quot;][&quot;login&quot;].ToString();
+
+            // GH #290, we need to look for the first asset which is a zip, otherwise we
+            // end up picking up manuals, pictures of cats, and all sorts of other things.
+
+            if ((&quot;application/x-zip-compressed&quot;.Equals (asset [&quot;content_type&quot;])) ||
+                (&quot;application/zip&quot;.Equals (asset [&quot;content_type&quot;])) ||
+                (asset [&quot;name&quot;].ToString ().EndsWith (&quot;.zip&quot;, StringComparison.OrdinalIgnoreCase)))
+            {
+                size     = (long) asset[&quot;size&quot;];
+                download = new Uri( asset[&quot;browser_download_url&quot;].ToString() );
+
+                log.DebugFormat(&quot;Download {0} is {1} bytes&quot;, download, size);
+            }
+            else
+            {
+                // TODO: A proper kraken, please!
+                throw new Kraken(&quot;Cannot find download&quot;);
+            }
+        }
+
+        override public void InflateMetadata(JObject metadata, string filename, object context)
+        {
+            var repo = (string)context;
+
+            // Check how big our file is
+            long download_size = (new FileInfo (filename)).Length;
+
+            // Make sure resources exist.
+            if (metadata[&quot;resources&quot;] == null)
+            {
+                metadata[&quot;resources&quot;] = new JObject();
+            }
+
+            Inflate(metadata, &quot;author&quot;, author);
+
+            if (version.EpochPart == 0 &amp;&amp; metadata[&quot;x_netkan_force_epoch&quot;] != null)
+            {
+                var epoch = int.Parse(metadata[&quot;x_netkan_force_epoch&quot;].ToString());
+                Inflate(metadata, &quot;version&quot;, String.Format(&quot;{0}:{1}&quot;, epoch, version.ToString()));
+            }
+            else
+            {
+                Inflate(metadata, &quot;version&quot;, version.ToString());
+            }
+
+            Inflate(metadata, &quot;download&quot;, Uri.EscapeUriString(download.ToString()));
+            Inflate(metadata, &quot;x_generated_by&quot;, &quot;netkan&quot;);
+            Inflate(metadata, &quot;download_size&quot;, download_size);
+            Inflate((JObject) metadata[&quot;resources&quot;], &quot;repository&quot;, GithubPage(repo));
+
+        }
+
+        public string Download(string identifier, NetFileCache cache)
+        {
+
+            log.DebugFormat(&quot;Downloading {0}&quot;, download);
+
+            string filename = ModuleInstaller.CachedOrDownload(identifier, version, download, cache);
+
+            log.Debug(&quot;Downloaded.&quot;);
+
+            return filename;
+        }
+
+        public static string GithubPage(string repo)
+        {
+            var github_base = new Uri(&quot;https://github.com/&quot;);
+            var url = new Uri(github_base, repo);
+            return url.ToString();
+        }
+
+
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,9,22,66,0],[23,9,23,10,0],[24,13,24,74,0],[25,13,25,66,0],[30,13,32,100,0],[33,13,33,14,0],[34,17,34,49,0],[35,17,35,80,0],[37,17,37,78,0],[38,13,38,14,0],[40,13,40,14,0],[42,17,42,58,0],[44,9,44,10,0],[47,9,47,10,0],[48,13,48,40,0],[51,13,51,67,0],[54,13,54,47,0],[55,13,55,14,0],[56,17,56,55,0],[57,13,57,14,0],[59,13,59,49,0],[61,13,61,84,0],[62,13,62,14,0],[63,17,63,84,0],[64,17,64,99,0],[65,13,65,14,0],[67,13,67,14,0],[68,17,68,66,0],[69,13,69,14,0],[71,13,71,85,0],[72,13,72,59,0],[73,13,73,63,0],[74,13,74,86,0],[76,9,76,10,0],[79,9,79,10,0],[81,13,81,58,0],[83,13,83,102,0],[85,13,85,38,0],[87,13,87,29,0],[88,9,88,10,0],[91,9,91,10,0],[92,13,92,62,0],[93,13,93,50,0],[94,13,94,35,0],[95,9,95,10,0],[20,9,20,89,0]]);
+    </script>
+  </body>
+</html>

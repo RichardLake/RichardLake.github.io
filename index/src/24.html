@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\net\netasyncdownloader.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Text.RegularExpressions;
+using System.Threading;
+using ChinhDo.Transactions;
+using log4net;
+using CurlSharp;
+
+namespace CKAN
+{      
+    /// &lt;summary&gt;
+    /// Download lots of files at once!
+    /// &lt;/summary&gt;
+    public class NetAsyncDownloader
+    {
+
+        public IUser User { get; set; }
+
+        // Private utility class for tracking downloads
+        private class NetAsyncDownloaderDownloadPart
+        {
+            public Uri url;
+            public WebClient agent = new WebClient();
+            public DateTime lastProgressUpdateTime;
+            public string path;
+            public long bytesLeft;
+            public long size;
+            public int bytesPerSecond;
+            public Exception error;
+            public int lastProgressUpdateSize;
+
+            public NetAsyncDownloaderDownloadPart(Uri url, long expectedSize, string path = null)
+            {
+                this.url = url;
+                this.path = path ?? Path.GetTempFileName();
+                bytesLeft = expectedSize;
+                size = expectedSize;
+                lastProgressUpdateTime = DateTime.Now;
+
+                agent.Headers.Add(&quot;user-agent&quot;, Net.UserAgentString);
+            }
+        }
+
+        private static readonly ILog log = LogManager.GetLogger(typeof (NetAsyncDownloader));
+
+        private List&lt;NetAsyncDownloaderDownloadPart&gt; downloads;
+        private List&lt;CkanModule&gt; modules;
+        private int completed_downloads;
+
+        private Object download_complete_lock = new Object();
+
+        private volatile bool downloadCanceled;
+
+        // Called on completion (including on error)
+        // Called with ALL NULLS on error.
+        // Can be set by ourself in the DownloadModules method.
+        private delegate void NetAsyncCompleted(Uri[] urls, string[] filenames, Exception[] errors);
+        private NetAsyncCompleted onCompleted;
+
+        // When using the curlsharp downloader, this contains all the threads
+        // that are working for us.
+        private List&lt;Thread&gt; curl_threads = new List&lt;Thread&gt; ();
+
+        /// &lt;summary&gt;
+        /// Returns a perfectly boring NetAsyncDownloader.
+        /// &lt;/summary&gt;
+        public NetAsyncDownloader(IUser user)
+        {
+            User = user;
+            downloads = new List&lt;NetAsyncDownloaderDownloadPart&gt;();
+            modules = new List&lt;CkanModule&gt;();
+        }
+
+        /// &lt;summary&gt;
+        /// Downloads our files, returning an array of filenames that we&#39;re writing to.
+        /// The sole argument is a collection of KeyValuePair(s) containing the download URL and the expected download size
+        /// The .onCompleted delegate will be called on completion.
+        /// &lt;/summary&gt;
+        private void Download(ICollection&lt;KeyValuePair&lt;Uri, long&gt;&gt; urls)
+        {
+            foreach (var download in urls.Select(url =&gt; new NetAsyncDownloaderDownloadPart(url.Key, url.Value)))
+            {
+                downloads.Add(download);
+            }
+                
+            if (Platform.IsWindows)
+            {
+                DownloadNative();
+            }
+            else
+            {
+                DownloadCurl();
+            }
+
+            // The user hasn&#39;t cancelled us yet. :)
+            downloadCanceled = false;
+
+            return;
+        }
+
+        /// &lt;summary&gt;
+        /// Download all our files using the native .NET hanlders.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The native.&lt;/returns&gt;
+        private void DownloadNative()
+        {
+            for (int i = 0; i &lt; downloads.Count; i++)
+            {
+                User.RaiseMessage(&quot;Downloading \&quot;{0}\&quot;&quot;, downloads[i].url);
+
+                // We need a new variable for our closure/lambda, hence index = i.
+                int index = i;
+
+                // Schedule for us to get back progress reports.
+                downloads[i].agent.DownloadProgressChanged +=
+                    (sender, args) =&gt;
+                    FileProgressReport(index, args.ProgressPercentage, args.BytesReceived,
+                        args.TotalBytesToReceive);
+
+                // And schedule a notification if we&#39;re done (or if something goes wrong)
+                downloads[i].agent.DownloadFileCompleted += (sender, args) =&gt; FileDownloadComplete(index, args.Error);
+
+                // Start the download!
+                downloads[i].agent.DownloadFileAsync(downloads[i].url, downloads[i].path);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Use curlsharp to handle our downloads.
+        /// &lt;/summary&gt;
+        private void DownloadCurl()
+        {
+            log.Debug(&quot;Curlsharp async downloader engaged&quot;);
+
+            // Make sure our environment is set up.
+
+            Curl.Init();
+
+            // We&#39;d *like* to use CurlMulti, but it just hangs when I try to retrieve
+            // messages from it. So we&#39;re spawning a thread for each curleasy that does
+            // the same thing. Ends up this is a little easier in handling, anyway.
+
+            for (int i = 0; i &lt; downloads.Count; i++)
+            {
+                log.DebugFormat(&quot;Downloading {0}&quot;, downloads[i].url);
+                User.RaiseMessage(&quot;Downloading \&quot;{0}\&quot; (libcurl)&quot;, downloads[i].url);
+
+                // Open our file, and make an easy object...
+                FileStream stream = File.OpenWrite(downloads[i].path);
+                CurlEasy easy = Curl.CreateEasy(downloads[i].url, stream);
+
+                // We need a separate variable for our closure, this is it.
+                int index = i;
+
+                // Curl recommends xferinfofunction, but this doesn&#39;t seem to
+                // be supported by curlsharp, so we use the progress function
+                // instead.
+                easy.ProgressFunction = delegate(object extraData, double dlTotal, double dlNow, double ulTotal, double ulNow)
+                {
+                    log.DebugFormat(&quot;Progress function called... {0}/{1}&quot;, dlNow,dlTotal);
+
+                    int percent = 0;
+
+                    if (dlTotal &gt; 0)
+                    {
+                        percent = (int) dlNow * 100 / (int) dlTotal;
+                    }
+                    else
+                    {
+                        log.Debug(&quot;Unknown download size, skipping progress..&quot;);
+                        return 0;
+                    }
+
+                    FileProgressReport(
+                        index,
+                        percent,
+                        Convert.ToInt64(dlNow),
+                        Convert.ToInt64(dlTotal)
+                    );
+
+                    // If the user has told us to cancel, then bail out now.
+                    if (downloadCanceled)
+                    {
+                        log.InfoFormat(&quot;Bailing out of download {0} at user request&quot;, index);
+                        // Bail out!
+                        return 1;
+                    }
+
+                    // Returning 0 means we want to continue the download.
+                    return 0;
+                };
+
+                // Download, little curl, fulfill your destiny!
+                Thread thread = new Thread(new ThreadStart(delegate
+                {
+                    CurlWatchThread(index, easy, stream);
+                }));
+
+                // Keep track of our threads so we can clean them up later.
+                curl_threads.Add(thread);
+
+                // Background threads will mostly look after themselves.
+                thread.IsBackground = true;
+
+                // Let&#39;s go!
+                thread.Start();
+            }
+
+            return;
+        }
+
+        /// &lt;summary&gt;
+        /// Starts a thread to watch download progress. Invoked by DownloadCUrl. Not for
+        /// public consumption.
+        /// &lt;/summary&gt;
+        private void CurlWatchThread(int index, CurlEasy easy, FileStream stream)
+        {
+            log.Debug(&quot;Curlsharp download thread started&quot;);
+
+            // This should run until completion or failture.
+            CurlCode result = easy.Perform();
+
+            log.Debug(&quot;Curlsharp download complete&quot;);
+
+            // Dispose of all our disposables.
+            // We have to do this *BEFORE* we call FileDownloadComplete, as it
+            // ensure we&#39;ve written everything out to disk.
+            stream.Dispose();
+            easy.Dispose();
+
+            if (result == CurlCode.Ok)
+            {
+                FileDownloadComplete(index, null);
+            }
+            else
+            {
+                // The CurlCode result expands to a human-friendly string, so we can just
+                // throw a kraken containing it and nothing else. The FileDownloadComplete
+                // code collects these into a larger DownloadErrorsKraken aggregate.
+
+                FileDownloadComplete(
+                    index,
+                    new Kraken(result.ToString())
+                );
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Downloads all the modules specified to the cache.
+        /// Even if modules share download URLs, they will only be downloaded once.
+        /// Blocks until the download is complete, cancelled, or errored.
+        /// &lt;/summary&gt;
+        public void DownloadModules(
+            NetFileCache cache,
+            IEnumerable&lt;CkanModule&gt; modules
+            )
+        {
+            var unique_downloads = new Dictionary&lt;Uri, CkanModule&gt;();
+
+            // Walk through all our modules, but only keep the first of each
+            // one that has a unique download path.
+            foreach (CkanModule module in modules.Where(module =&gt; !unique_downloads.ContainsKey(module.download)))
+            {
+                unique_downloads[module.download] = module;
+            }
+            this.modules.AddRange(unique_downloads.Values);
+
+            // Schedule us to process our modules on completion.            
+            onCompleted =
+                (_uris, paths, errors) =&gt;
+                    ModuleDownloadsComplete(cache, _uris, paths, errors);
+
+            // retrieve the expected download size for each mod
+            List&lt;KeyValuePair&lt;Uri, long&gt;&gt; downloads_with_size = new List&lt;KeyValuePair&lt;Uri, long&gt;&gt;();
+
+            foreach(var item in unique_downloads)
+            {
+                downloads_with_size.Add(new KeyValuePair&lt;Uri, long&gt;(item.Key, item.Value.download_size));
+            }
+
+            // Start the download!
+            Download(downloads_with_size);
+
+            // The Monitor.Wait function releases a lock, and then waits until it can re-acquire it.
+            // Elsewhere, our downloading callback pulses the lock, which causes us to wake up and
+            // continue.
+            lock (download_complete_lock)
+            {
+                log.Debug(&quot;Waiting for downloads to finish...&quot;);
+                Monitor.Wait(download_complete_lock);
+            }
+
+            // If the user cancelled our progress, then signal that.
+            // This *should* be harmless if we&#39;re using the curlsharp downloader,
+            // which watches for downloadCanceled all by itself. :)
+            if (downloadCanceled)
+            {
+                // Abort all our traditional downloads, if there are any.
+                foreach (var download in downloads)
+                {
+                    download.agent.CancelAsync();
+                }
+
+                // Abort all our curl downloads, if there are any.
+                foreach (Thread thread in curl_threads)
+                {
+                    thread.Abort();
+                }
+
+                // Signal to the caller that the user cancelled the download.
+                throw new CancelledActionKraken(&quot;Download cancelled by user&quot;);
+            }
+
+            // Check to see if we&#39;ve had any errors. If so, then release the kraken!
+            List&lt;Exception&gt; exceptions = downloads
+                .Select(x =&gt; x.error)
+                .Where(ex =&gt; ex != null)
+                .ToList();
+
+            // Let&#39;s check if any of these are certificate errors. If so,
+            // we&#39;ll report that instead, as this is common (and user-fixable)
+            // under Linux.
+            if (exceptions.Any(ex =&gt; ex is WebException &amp;&amp; 
+                Regex.IsMatch(ex.Message, &quot;authentication or decryption has failed&quot;)))
+            {
+                throw new MissingCertificateKraken();
+            }
+
+            if (exceptions.Count &gt; 0)
+            {
+                throw new DownloadErrorsKraken(exceptions);
+            }
+
+            // Yay! Everything worked!
+        }
+
+        /// &lt;summary&gt;
+        /// Stores all of our files in the cache once done.
+        /// Called by NetAsyncDownloader on completion.
+        /// Called with all nulls on download cancellation.
+        /// &lt;/summary&gt;
+        private void ModuleDownloadsComplete(NetFileCache cache, Uri[] urls, string[] filenames,
+            Exception[] errors)
+        {
+            if (urls != null)
+            {
+                // spawn up to 3 dialogs
+                int errorDialogsLeft = 3;
+
+                for (int i = 0; i &lt; errors.Length; i++)
+                {
+                    if (errors[i] != null)
+                    {
+                        if (errorDialogsLeft &gt; 0)
+                        {
+                            User.RaiseError(&quot;Failed to download \&quot;{0}\&quot; - error: {1}&quot;, urls[i], errors[i].Message);
+                            errorDialogsLeft--;
+                        }
+                    }
+                    else
+                    {   
+                        // Even if some of our downloads failed, we want to cache the
+                        // ones which succeeded.
+
+                        // This doesn&#39;t work :( 
+                        // for some reason the tmp files get deleted before we get here and we get a nasty exception
+                        // not only that but then we try _to install_ the rest of the mods and then CKAN crashes
+                        // and the user&#39;s registry gets corrupted forever
+                        // commenting out until this is resolved
+                        // ~ nlight
+
+                        try
+                        {
+                            cache.Store(urls[i], filenames[i], modules[i].StandardName());
+                        }
+                        catch (FileNotFoundException e)
+                        {
+                            log.WarnFormat(&quot;cache.Store(): FileNotFoundException: {0}&quot;, e.Message);
+                        }
+                    }
+                }
+            }
+
+            if (filenames != null)
+            {
+                // Finally, remove all our temp files.
+                // We probably *could* have used Store&#39;s integrated move function above, but if we managed
+                // to somehow get two URLs the same in our download set, that could cause right troubles!
+
+                foreach (string tmpfile in filenames)
+                {
+                    log.DebugFormat(&quot;Cleaning up {0}&quot;, tmpfile);
+                    File.Delete(tmpfile);
+                }
+            }
+
+            // Signal that we&#39;re done.
+            lock (download_complete_lock)
+            {
+                Monitor.Pulse(download_complete_lock);
+            }
+            User.RaiseDownloadsCompleted(urls, filenames, errors);
+        }
+
+        /// &lt;summary&gt;
+        /// Cancel any running downloads. This will also call onCompleted with
+        /// all null arguments.
+        /// &lt;/summary&gt;
+        public void CancelDownload()
+        {
+            log.Info(&quot;Cancelling download&quot;);
+
+            downloadCanceled = true;
+
+            lock (download_complete_lock)
+            {
+                Monitor.Pulse(download_complete_lock);
+            }
+
+            if (onCompleted != null)
+            {
+                onCompleted(null, null, null);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Generates a download progress reports, and sends it to
+        /// onProgressReport if it&#39;s set. This takes the index of the file
+        /// being downloaded, the percent complete, the bytes downloaded,
+        /// and the total amount of bytes we expect to download.
+        /// &lt;/summary&gt;
+        private void FileProgressReport(int index, int percent, long bytesDownloaded, long bytesToDownload)
+        {
+            if (downloadCanceled)
+            {
+                return;
+            }
+
+            NetAsyncDownloaderDownloadPart download = downloads[index];
+
+            DateTime now = DateTime.Now;
+            TimeSpan timeSpan = now - download.lastProgressUpdateTime;
+            if (timeSpan.Seconds &gt;= 3.0)
+            {
+                long bytesChange = bytesDownloaded - download.lastProgressUpdateSize;
+                download.lastProgressUpdateSize = (int) bytesDownloaded;
+                download.lastProgressUpdateTime = now;
+                download.bytesPerSecond = (int) bytesChange/timeSpan.Seconds;
+            }
+
+            download.size = bytesToDownload;
+            download.bytesLeft = download.size - bytesDownloaded;
+            downloads[index] = download;
+
+            int totalPercentage = 0;
+            int totalBytesPerSecond = 0;
+            long totalBytesLeft = 0;
+            long totalSize = 0;
+
+            foreach (NetAsyncDownloaderDownloadPart t in downloads.ToList())
+            {
+                if (t.bytesLeft &gt; 0)
+                {
+                    totalBytesPerSecond += t.bytesPerSecond;
+                }
+
+                totalBytesLeft += t.bytesLeft;
+                totalSize += t.size;
+            }
+            totalPercentage = (int)(((totalSize - totalBytesLeft) * 100) / (totalSize));
+
+            if (!downloadCanceled)
+            {
+                User.RaiseProgress(
+                    String.Format(&quot;{0} kbps - downloading - {1} MiB left&quot;,
+                        totalBytesPerSecond/1024,
+                        (totalBytesLeft)/1024/1024),
+                    totalPercentage);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// This method gets called back by `WebClient` or our
+        /// curl downloader when a download is completed. It in turn
+        /// calls the onCompleted hook when *all* downloads are finished.
+        /// &lt;/summary&gt;
+        private void FileDownloadComplete(int index, Exception error)
+        {
+            if (error != null)
+            {
+                log.InfoFormat(&quot;Error downloading {0}: {1}&quot;, downloads[index].url, error);
+            }
+            else
+            {
+                log.InfoFormat(&quot;Finished downloading {0}&quot;, downloads[index].url);
+            }
+            completed_downloads++;
+
+            // If there was an error, remember it, but we won&#39;t raise it until
+            // all downloads are finished or cancelled.
+            downloads[index].error = error;
+
+            if (completed_downloads == downloads.Count)
+            {
+                log.Info(&quot;All files finished downloading&quot;);
+
+                // If we have a callback, then signal that we&#39;re done.
+
+                var fileUrls = new Uri[downloads.Count];
+                var filePaths = new string[downloads.Count];
+                var errors = new Exception[downloads.Count];
+
+                for (int i = 0; i &lt; downloads.Count; i++)
+                {
+                    fileUrls[i] = downloads[i].url;
+                    filePaths[i] = downloads[i].path;
+                    errors[i] = downloads[i].error;
+                }
+
+                log.Debug(&quot;Signalling completion via callback&quot;);
+                onCompleted(fileUrls, filePaths, errors);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,29,20,33,0],[20,34,20,38,0],[53,9,53,62,0],[65,9,65,65,0],[70,9,70,46,0],[71,9,71,10,0],[72,13,72,25,0],[73,13,73,68,0],[74,13,74,46,0],[75,9,75,10,0],[83,9,83,10,0],[84,13,84,20,0],[84,38,84,57,0],[84,111,84,112,0],[84,22,84,34,0],[85,13,85,14,0],[86,17,86,41,0],[87,13,87,14,0],[84,35,84,37,0],[89,13,89,36,0],[90,13,90,14,0],[91,17,91,34,0],[92,13,92,14,0],[94,13,94,14,0],[95,17,95,32,0],[96,13,96,14,0],[99,13,99,38,0],[101,13,101,20,0],[102,9,102,10,0],[109,9,109,10,0],[110,18,110,27,0],[111,13,111,14,0],[112,17,112,76,0],[115,17,115,31,0],[118,17,120,21,0],[121,50,121,51,0],[124,17,124,79,0],[124,118,124,119,0],[127,17,127,91,0],[128,13,128,14,0],[110,50,110,53,0],[110,29,110,48,0],[129,9,129,10,0],[135,9,135,10,0],[136,13,136,61,0],[140,13,140,25,0],[146,18,146,27,0],[147,13,147,14,0],[148,17,148,70,0],[149,17,149,86,0],[152,17,152,71,0],[153,17,153,75,0],[156,17,156,31,0],[161,17,162,17,0],[162,18,163,21,0],[163,91,165,21,0],[165,37,167,21,0],[167,37,168,21,0],[168,22,169,25,0],[169,69,170,21,0],[170,22,172,21,0],[172,22,173,25,0],[173,81,174,25,0],[174,34,177,21,0],[182,23,185,21,0],[185,42,186,21,0],[186,22,187,25,0],[187,94,189,25,0],[189,34,193,21,0],[193,30,194,17,0],[194,18,194,19,0],[197,17,198,17,0],[198,18,199,21,0],[199,58,200,17,0],[200,18,200,21,0],[203,17,203,42,0],[206,17,206,44,0],[209,17,209,32,0],[210,13,210,14,0],[146,50,146,53,0],[146,29,146,48,0],[212,13,212,20,0],[213,9,213,10,0],[220,9,220,10,0],[221,13,221,60,0],[224,13,224,46,0],[226,13,226,54,0],[231,13,231,30,0],[232,13,232,28,0],[234,13,234,39,0],[235,13,235,14,0],[236,17,236,51,0],[237,13,237,14,0],[239,13,239,14,0],[244,17,247,19,0],[248,13,248,14,0],[249,9,249,10,0],[260,9,260,10,0],[261,13,261,70,0],[265,13,265,20,0],[265,43,265,67,0],[265,113,265,114,0],[265,22,265,39,0],[266,13,266,14,0],[267,17,267,60,0],[268,13,268,14,0],[265,40,265,42,0],[269,13,269,60,0],[272,13,274,21,0],[274,73,274,74,0],[277,13,277,101,0],[279,13,279,20,0],[279,33,279,49,0],[279,21,279,29,0],[280,13,280,14,0],[281,17,281,106,0],[282,13,282,14,0],[279,30,279,32,0],[285,13,285,43,0],[290,13,290,42,0],[291,13,291,14,0],[292,17,292,65,0],[293,17,293,54,0],[294,13,294,14,0],[299,13,299,34,0],[300,13,300,14,0],[302,17,302,24,0],[302,42,302,51,0],[302,26,302,38,0],[303,17,303,18,0],[304,21,304,50,0],[305,17,305,18,0],[302,39,302,41,0],[308,17,308,24,0],[308,43,308,55,0],[308,26,308,39,0],[309,17,309,18,0],[310,21,310,36,0],[311,17,311,18,0],[308,40,308,42,0],[314,17,314,79,0],[318,13,319,30,0],[319,37,320,30,0],[320,40,321,27,0],[326,13,326,38,0],[327,85,327,87,0],[328,13,328,14,0],[329,17,329,54,0],[332,13,332,38,0],[333,13,333,14,0],[334,17,334,60,0],[338,9,338,10,0],[347,9,347,10,0],[348,13,348,30,0],[349,13,349,14,0],[351,17,351,42,0],[353,22,353,31,0],[354,17,354,18,0],[355,21,355,43,0],[356,21,356,22,0],[357,25,357,50,0],[358,25,358,26,0],[359,29,359,116,0],[360,29,360,48,0],[361,25,361,26,0],[362,21,362,22,0],[364,21,364,22,0],[376,25,376,26,0],[377,29,377,91,0],[378,25,378,26,0],[379,25,379,56,0],[380,25,380,26,0],[381,29,381,100,0],[382,25,382,26,0],[383,21,383,22,0],[384,17,384,18,0],[353,52,353,55,0],[353,33,353,50,0],[385,13,385,14,0],[387,13,387,35,0],[388,13,388,14,0],[393,17,393,24,0],[393,44,393,53,0],[393,26,393,40,0],[394,17,394,18,0],[395,21,395,65,0],[396,21,396,42,0],[397,17,397,18,0],[393,41,393,43,0],[398,13,398,14,0],[401,13,401,42,0],[402,13,402,14,0],[403,17,403,55,0],[404,13,404,14,0],[405,13,405,67,0],[406,9,406,10,0],[413,9,413,10,0],[414,13,414,45,0],[416,13,416,37,0],[418,13,418,42,0],[419,13,419,14,0],[420,17,420,55,0],[421,13,421,14,0],[423,13,423,37,0],[424,13,424,14,0],[425,17,425,47,0],[426,13,426,14,0],[427,9,427,10,0],[436,9,436,10,0],[437,13,437,34,0],[438,13,438,14,0],[439,17,439,24,0],[442,13,442,72,0],[444,13,444,41,0],[445,13,445,71,0],[446,13,446,41,0],[447,13,447,14,0],[448,17,448,86,0],[449,17,449,73,0],[450,17,450,55,0],[451,17,451,78,0],[452,13,452,14,0],[454,13,454,45,0],[455,13,455,66,0],[456,13,456,41,0],[458,13,458,37,0],[459,13,459,41,0],[460,13,460,37,0],[461,13,461,32,0],[463,13,463,20,0],[463,58,463,76,0],[463,22,463,54,0],[464,13,464,14,0],[465,17,465,37,0],[466,17,466,18,0],[467,21,467,61,0],[468,17,468,18,0],[470,17,470,47,0],[471,17,471,37,0],[472,13,472,14,0],[463,55,463,57,0],[473,13,473,89,0],[475,13,475,35,0],[476,13,476,14,0],[477,17,481,38,0],[482,13,482,14,0],[483,9,483,10,0],[491,9,491,10,0],[492,13,492,31,0],[493,13,493,14,0],[494,17,494,91,0],[495,13,495,14,0],[497,13,497,14,0],[498,17,498,82,0],[499,13,499,14,0],[500,13,500,35,0],[504,13,504,44,0],[506,13,506,56,0],[507,13,507,14,0],[508,17,508,60,0],[512,17,512,57,0],[513,17,513,61,0],[514,17,514,61,0],[516,22,516,31,0],[517,17,517,18,0],[518,21,518,52,0],[519,21,519,54,0],[520,21,520,52,0],[521,17,521,18,0],[516,54,516,57,0],[516,33,516,52,0],[523,17,523,65,0],[524,17,524,58,0],[525,13,525,14,0],[526,9,526,10,0],[47,9,47,94,0],[26,13,26,54,0],[35,13,35,98,0],[36,13,36,14,0],[37,17,37,32,0],[38,17,38,60,0],[39,17,39,42,0],[40,17,40,37,0],[41,17,41,55,0],[43,17,43,70,0],[44,13,44,14,0],[84,57,84,111,0],[319,30,319,37,0],[320,30,320,40,0],[326,38,327,85,0],[120,21,121,50,0],[124,79,124,118,0],[162,17,162,18,0],[163,21,163,91,0],[165,21,165,37,0],[167,21,167,37,0],[168,21,168,22,0],[169,25,169,69,0],[170,21,170,22,0],[172,21,172,22,0],[173,25,173,81,0],[174,25,174,34,0],[177,21,182,23,0],[185,21,185,42,0],[186,21,186,22,0],[187,25,187,94,0],[189,25,189,34,0],[193,21,193,30,0],[194,17,194,18,0],[198,17,198,18,0],[199,21,199,58,0],[200,17,200,18,0],[265,67,265,113,0],[274,21,274,73,0]]);
+    </script>
+  </body>
+</html>

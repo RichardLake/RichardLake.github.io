@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-cmdline\action\remove.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using log4net;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
+
+namespace CKAN.CmdLine
+{
+    public class Remove : ICommand
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof(Remove));
+
+        public IUser user { get; set; }
+
+        public Remove(IUser user)
+        {
+            this.user = user;
+        }
+
+        // Uninstalls a module, if it exists.
+        public int RunCommand(CKAN.KSP ksp, object raw_options)
+        {
+            RemoveOptions options = (RemoveOptions) raw_options;
+
+            // Use one (or more!) regex to select the modules to remove
+            if (options.regex)
+            {
+                // Parse every &quot;module&quot; as a grumpy regex
+                var justins = options.modules.Select(s =&gt; new Regex(s));
+
+                // Modules that have been selected by one regex
+                List&lt;string&gt; selectedModules = new List&lt;string&gt;();
+
+                // Get the list of installed modules
+                Registry registry = RegistryManager.Instance(ksp).registry;
+                var installed = new SortedDictionary&lt;string, Version&gt;(registry.Installed(false));
+
+                // Try every regex on every installed module:
+                // if it matches, select for removal
+                foreach (string mod in installed.Keys)
+                {
+                    if (justins.Any(re =&gt; re.IsMatch(mod)))
+                        selectedModules.Add(mod);
+                }
+
+                // Replace the regular expressions with the selected modules
+                // and continue removal as usual
+                options.modules = selectedModules;
+            }
+
+            if (options.modules != null &amp;&amp; options.modules.Count &gt; 0)
+            {
+                try
+                {
+                    var installer = ModuleInstaller.GetInstance(ksp, user);
+                    installer.UninstallList(options.modules);
+                }
+                catch (ModNotInstalledKraken kraken)
+                {
+                    user.RaiseMessage(&quot;I can&#39;t do that, {0} isn&#39;t installed.&quot;, kraken.mod);
+                    user.RaiseMessage(&quot;Try `ckan list` for a list of installed mods.&quot;);
+                    return Exit.BADOPT;
+                }
+            }
+            else
+            {
+                user.RaiseMessage(&quot;No mod selected, nothing to do&quot;);
+                return Exit.BADOPT;
+            }
+
+            return Exit.OK;
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[12,29,12,33,0],[12,34,12,38,0],[14,9,14,34,0],[16,13,16,30,0],[17,9,17,10,0],[22,13,22,65,0],[25,13,25,31,0],[28,17,28,59,0],[28,71,28,73,0],[31,17,31,67,0],[34,17,34,76,0],[35,17,35,98,0],[39,40,39,54,0],[39,26,39,36,0],[41,21,41,43,0],[41,58,41,60,0],[42,25,42,50,0],[39,37,39,39,0],[47,17,47,51,0],[50,13,50,70,0],[54,21,54,76,0],[55,21,55,62,0],[56,17,56,18,0],[57,17,57,53,0],[59,21,59,92,0],[60,21,60,88,0],[61,21,61,40,0],[66,17,66,69,0],[67,17,67,36,0],[70,13,70,28,0],[71,9,71,10,0],[10,9,10,81,0],[41,43,41,58,0],[28,59,28,71,0]]);
+    </script>
+  </body>
+</html>

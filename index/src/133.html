@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\web.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.IO;
+using System.Text;
+using CurlSharp;
+using log4net;
+
+namespace CKAN.NetKAN
+{
+	public class Web :IDisposable
+	{
+		private static bool init_complete = false;
+		private CurlEasy easy;
+		private static readonly ILog log = LogManager.GetLogger(typeof (Web));
+
+		/// &lt;summary&gt;
+		/// Initializes a new instance of the &lt;see cref=&quot;CKAN.NetKAN.Web&quot;/&gt; class.
+		/// &lt;/summary&gt;
+		public Web()
+		{
+			if (!init_complete)
+			{
+				CurlSharp.Curl.GlobalInit(CurlInitFlag.All);
+				init_complete = true;
+			}
+
+		    easy = new CurlEasy
+		    {
+		        UserAgent = Net.UserAgentString,
+		        CaInfo = &quot;./curl-ca-bundle.crt&quot;
+		    };
+		}
+
+		/// &lt;summary&gt;
+		/// Takes a URL, and returns the content found there as a string.
+		/// &lt;/summary&gt;
+		/// &lt;returns&gt;The string.&lt;/returns&gt;
+		/// &lt;param name=&quot;url&quot;&gt;URL.&lt;/param&gt;
+		public string DownloadString(string url)
+		{
+			log.DebugFormat (&quot;About to download {0}&quot;, url);
+
+			string content = &quot;&quot;;
+
+			easy.Url = url;
+			easy.WriteData = null;
+			easy.WriteFunction = delegate(byte[] buf, int size, int nmemb, object extraData) {
+				content += Encoding.UTF8.GetString(buf);
+				return size*nmemb;
+			};
+
+			CurlCode result = easy.Perform();
+
+			if (result != CurlCode.Ok)
+			{
+				throw new Exception(&quot;Curl download failed with error &quot; + result);
+			}
+
+			log.DebugFormat (&quot;Download from {0}:\n\n{1}&quot;, url, content);
+
+			return content;
+		}
+
+		/// &lt;summary&gt;
+		/// Releases all resource used by the &lt;see cref=&quot;CKAN.NetKAN.Web&quot;/&gt; object.
+		/// &lt;/summary&gt;
+		/// &lt;remarks&gt;Call &lt;see cref=&quot;Dispose&quot;/&gt; when you are finished using the &lt;see cref=&quot;CKAN.NetKAN.Web&quot;/&gt;. The
+		/// &lt;see cref=&quot;Dispose&quot;/&gt; method leaves the &lt;see cref=&quot;CKAN.NetKAN.Web&quot;/&gt; in an unusable state. After calling
+		/// &lt;see cref=&quot;Dispose&quot;/&gt;, you must release all references to the &lt;see cref=&quot;CKAN.NetKAN.Web&quot;/&gt; so the garbage
+		/// collector can reclaim the memory that the &lt;see cref=&quot;CKAN.NetKAN.Web&quot;/&gt; was occupying.&lt;/remarks&gt;
+		public void Dispose()
+		{
+			CurlSharp.Curl.GlobalCleanup();
+			easy.Dispose();
+		}
+	}
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[18,3,18,15,0],[19,3,19,4,0],[20,4,20,23,0],[21,4,21,5,0],[22,5,22,49,0],[23,5,23,26,0],[24,4,24,5,0],[26,7,30,9,0],[31,3,31,4,0],[39,3,39,4,0],[40,4,40,51,0],[42,4,42,24,0],[44,4,44,19,0],[45,4,45,26,0],[46,4,46,85,0],[46,86,47,5,0],[47,45,48,5,0],[48,23,49,4,0],[49,5,49,6,0],[51,4,51,37,0],[53,4,53,30,0],[54,4,54,5,0],[55,5,55,70,0],[58,4,58,64,0],[60,4,60,19,0],[61,3,61,4,0],[71,3,71,4,0],[72,4,72,35,0],[73,4,73,19,0],[74,3,74,4,0],[11,3,11,45,0],[13,3,13,73,0],[46,85,46,86,0],[47,5,47,45,0],[48,5,48,23,0],[49,4,49,5,0]]);
+    </script>
+  </body>
+</html>

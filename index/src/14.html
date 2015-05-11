@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\meta.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Text.RegularExpressions;
+
+namespace CKAN
+{
+    public static class Meta
+    {
+        public readonly static string Development = &quot;development&quot;;
+
+        // Do *not* change the following line, BUILD_VERSION is
+        // replaced by our build system with our actual version.
+
+        private readonly static string BUILD_VERSION = null;
+
+        /// &lt;summary&gt;
+        /// Returns the version of the CKAN.dll used, complete with git info
+        /// and other decorations as filled in by our build system.
+        /// Eg: v1.3.5-12-g055d7c3 (beta) or &quot;development (unstable)&quot;
+        /// &lt;/summary&gt;
+        public static string Version()
+        {
+            string version = BuildVersion();
+
+            #if (STABLE)
+            version += &quot; (stable)&quot;;
+            #else
+            version += &quot; (beta)&quot;;
+            #endif
+
+            return version;
+        }
+
+        /// &lt;summary&gt;
+        /// Returns only the build info, with no decorations, or &quot;development&quot; if
+        /// unknown.
+        /// &lt;/summary&gt;
+        public static string BuildVersion()
+        {
+            return BUILD_VERSION ?? Development;
+        }
+
+        /// &lt;summary&gt;
+        /// Returns just our release number (eg: 1.0.3), or null for a dev build.
+        /// &lt;/summary&gt;
+        public static Version ReleaseNumber()
+        {
+            string build_version = BuildVersion();
+
+            if (build_version == Development)
+            {
+                return null;
+            }
+
+            string short_version = Regex.Match(build_version, @&quot;^(.*)-\d+-.*$&quot;).Result(&quot;$1&quot;);
+
+            return new Version(short_version);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns true if this is a &#39;stable&#39; build, false otherwise.
+        /// &lt;/summary&gt;
+        public static bool IsStable()
+        {
+            #if (STABLE)
+            return true;
+            #else
+            return false;
+            #endif
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,9,20,10,0],[21,13,21,45,0],[26,13,26,34,0],[29,13,29,28,0],[30,9,30,10,0],[53,13,53,94,0],[55,13,55,47,0],[62,9,62,10,0],[66,13,66,26,0],[68,9,68,10,0],[37,9,37,10,1],[38,13,38,49,1],[39,9,39,10,1],[45,9,45,10,1],[46,13,46,51,1],[48,13,48,46,1],[49,13,49,14,1],[50,17,50,29,1],[56,9,56,10,1],[7,9,7,67,1],[12,9,12,61,1]]);
+    </script>
+  </body>
+</html>

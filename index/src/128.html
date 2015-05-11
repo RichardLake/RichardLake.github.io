@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\jenkins\jenkinsbuild.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.IO;
+using System.Linq;
+using log4net;
+using Newtonsoft.Json.Linq;
+
+namespace CKAN.NetKAN
+{
+    public class JenkinsBuild : CkanInflator
+    {
+        public Version version;
+        public Uri download;
+
+        private static readonly ILog log = LogManager.GetLogger(typeof (JenkinsBuild));
+
+        public JenkinsBuild (JObject parsed_json, string versionBase, string buildNumber, string baseUri, bool stable = true)
+        {
+            log.DebugFormat (&quot;Parsing build from {0}, {1}, {2}&quot;, versionBase, buildNumber, baseUri);
+            log.DebugFormat (&quot;Artifact JSON: {0}&quot;, parsed_json);
+            // We don&#39;t have a good way of obtaining version information (yet)
+            // This might be improved via AVC support on addons which contain that...
+            version  = new Version( versionBase + &quot;-&quot; + buildNumber );
+            string relativePath = (string) parsed_json [&quot;relativePath&quot;];
+            string downloadUri = baseUri + &quot;lastStableBuild/artifact/&quot; + relativePath;
+            log.DebugFormat (&quot;Download URI: {0}&quot;, downloadUri);
+            download = new Uri (downloadUri);
+        }
+
+        override public void InflateMetadata(JObject metadata, string filename, object context)
+        {
+            var repo = (string)context;
+
+            // Check how big our file is
+            long download_size = (new FileInfo (filename)).Length;
+
+            // Make sure resources exist.
+            if (metadata[&quot;resources&quot;] == null)
+            {
+                metadata[&quot;resources&quot;] = new JObject();
+            }
+
+            // Inflate(metadata, &quot;author&quot;, author);
+            Inflate(metadata, &quot;version&quot;, version.ToString());
+            Inflate(metadata, &quot;download&quot;, Uri.EscapeUriString(download.ToString()));
+            Inflate(metadata, &quot;x_generated_by&quot;, &quot;netkan&quot;);
+            Inflate(metadata, &quot;download_size&quot;, download_size);
+            // Inflate((JObject) metadata[&quot;resources&quot;], &quot;repository&quot;, GithubPage(repo));
+        }
+
+        public string Download(string identifier, NetFileCache cache)
+        {
+            log.DebugFormat(&quot;Downloading {0}&quot;, download);
+
+            string filename = ModuleInstaller.CachedOrDownload(identifier, version, download, cache);
+
+            log.Debug(&quot;Downloaded.&quot;);
+
+            return filename;
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[16,9,16,126,0],[17,9,17,10,0],[18,13,18,101,0],[19,13,19,65,0],[22,13,22,71,0],[23,13,23,73,0],[24,13,24,87,0],[25,13,25,64,0],[26,13,26,46,0],[27,9,27,10,0],[30,9,30,10,0],[31,13,31,40,0],[34,13,34,67,0],[37,13,37,47,0],[38,13,38,14,0],[39,17,39,55,0],[40,13,40,14,0],[43,13,43,62,0],[44,13,44,85,0],[45,13,45,59,0],[46,13,46,63,0],[48,9,48,10,0],[51,9,51,10,0],[52,13,52,58,0],[54,13,54,102,0],[56,13,56,38,0],[58,13,58,29,0],[59,9,59,10,0],[14,9,14,88,0]]);
+    </script>
+  </body>
+</html>

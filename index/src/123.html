@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\ks\ksversion.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using log4net;
+using Newtonsoft.Json;
+
+namespace CKAN.NetKAN
+{
+    public class KSVersion
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof (KSVersion));
+
+        // These all get filled by JSON deserialisation.
+        public KSPVersion KSP_version;
+        public string changelog;
+
+        [JsonConverter(typeof(JsonConvertFromRelativeKsUri))]
+        public Uri download_path;
+
+        public Version friendly_version;
+        public int id;
+
+        public string Download(string identifier, NetFileCache cache)
+        {
+            log.DebugFormat(&quot;Downloading {0}&quot;, download_path);
+
+            string filename = ModuleInstaller.CachedOrDownload(identifier, friendly_version, download_path, cache);
+
+            log.Debug(&quot;Downloaded.&quot;);
+
+            return filename;
+        }
+
+        /// &lt;summary&gt;
+        /// A simple helper class to prepend KerbalStuff URLs.
+        /// &lt;/summary&gt;
+        private class JsonConvertFromRelativeKsUri : JsonConverter
+        {
+            public override object ReadJson(
+                JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer
+            )
+            {
+                return KSAPI.ExpandPath(reader.Value.ToString());
+            }
+
+            public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+            {
+                throw new NotImplementedException();
+            }
+
+            public override bool CanConvert(Type objectType)
+            {
+                throw new NotImplementedException();
+            }
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,9,22,10,0],[23,13,23,63,0],[25,13,25,116,0],[27,13,27,38,0],[29,13,29,29,0],[30,9,30,10,0],[9,9,9,85,0],[40,13,40,14,0],[41,17,41,66,0],[42,13,42,14,0],[45,13,45,14,0],[46,17,46,53,0],[50,13,50,14,0],[51,17,51,53,0]]);
+    </script>
+  </body>
+</html>

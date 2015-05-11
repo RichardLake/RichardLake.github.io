@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\mainrepo.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.ComponentModel;
+using System.Net;
+using System.Windows.Forms;
+using Newtonsoft.Json;
+
+namespace CKAN
+{
+    public struct RepositoryList
+    {
+        public Repository[] repositories;
+    }
+
+
+    public partial class Main
+    {
+        private BackgroundWorker m_UpdateRepoWorker;
+        
+        public static RepositoryList FetchMasterRepositoryList(Uri master_uri = null)
+        {
+            WebClient client = new WebClient();
+
+            if (master_uri == null)
+            {
+                master_uri = Repository.default_repo_master_list;
+            }
+
+            string json = client.DownloadString(master_uri);
+            return JsonConvert.DeserializeObject&lt;RepositoryList&gt;(json);
+        }
+
+        public void UpdateRepo()
+        {
+            m_User.displayYesNo = YesNoDialog;
+
+            m_TabController.RenameTab(&quot;WaitTabPage&quot;, &quot;Updating repositories&quot;);
+
+            CurrentInstance.ScanGameData();
+
+            m_UpdateRepoWorker.RunWorkerAsync();
+
+            Util.Invoke(this, () =&gt; Enabled = false);
+
+            SetDescription(&quot;Contacting repository..&quot;);
+            ClearLog();
+            ShowWaitDialog();
+        }
+
+        private void UpdateRepo(object sender, DoWorkEventArgs e)
+        {
+            try
+            {
+                KSP current_instance1 = CurrentInstance;
+                Repo.UpdateAllRepositories(RegistryManager.Instance(CurrentInstance), current_instance1, GUI.user);
+            }
+            catch (UriFormatException ex)
+            {
+                m_ErrorDialog.ShowErrorDialog(ex.Message);
+            }
+            catch (MissingCertificateKraken ex)
+            {
+                m_ErrorDialog.ShowErrorDialog(ex.ToString());
+            }
+            catch (Exception ex)
+            {
+                m_ErrorDialog.ShowErrorDialog(&quot;Failed to connect to repository. Exception: &quot; + ex.Message);
+            }
+
+            m_User.displayYesNo = null;
+        }
+
+        private void PostUpdateRepo(object sender, RunWorkerCompletedEventArgs e)
+        {
+            SetDescription(&quot;Scanning for manually installed mods&quot;);
+            CurrentInstance.ScanGameData();
+
+            UpdateModsList(repo_updated: true);
+
+            HideWaitDialog(true);
+            AddStatusMessage(&quot;Repository successfully updated&quot;);
+
+            Util.Invoke(ModList, () =&gt; ModList.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.AllCells));
+            Util.Invoke(this, () =&gt; Enabled = true);
+            Util.Invoke(this, RecreateDialogs);
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,9,20,10,0],[21,13,21,48,0],[23,13,23,36,0],[24,13,24,14,0],[25,17,25,66,0],[26,13,26,14,0],[28,13,28,61,0],[29,13,29,72,0],[30,9,30,10,0],[33,9,33,10,0],[34,13,34,47,0],[36,13,36,79,0],[38,13,38,44,0],[40,13,40,49,0],[42,13,42,37,0],[42,52,42,54,0],[44,13,44,55,0],[45,13,45,24,0],[46,13,46,30,0],[47,9,47,10,0],[50,9,50,10,0],[52,13,52,14,0],[53,17,53,57,0],[54,17,54,116,0],[55,13,55,14,0],[56,13,56,42,0],[57,13,57,14,0],[58,17,58,59,0],[59,13,59,14,0],[60,13,60,48,0],[61,13,61,14,0],[62,17,62,62,0],[63,13,63,14,0],[64,13,64,33,0],[65,13,65,14,0],[66,17,66,108,0],[67,13,67,14,0],[69,13,69,40,0],[70,9,70,10,0],[73,9,73,10,0],[74,13,74,68,0],[75,13,75,44,0],[77,13,77,48,0],[79,13,79,34,0],[80,13,80,65,0],[82,13,82,40,0],[82,107,82,109,0],[83,13,83,37,0],[83,51,83,53,0],[84,13,84,48,0],[85,9,85,10,0],[42,37,42,52,0],[82,40,82,107,0],[83,37,83,51,0]]);
+    </script>
+  </body>
+</html>

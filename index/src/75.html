@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\program.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Diagnostics;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace CKAN
+{
+    public static class GUI
+    {
+        internal static GUIUser user = new GUIUser();
+        /// &lt;summary&gt;
+        ///     The main entry point for the application.
+        /// &lt;/summary&gt;
+        [STAThread]
+        public static void Main(string[] args)
+        {
+            Main_(args);
+        }
+
+        public static void Main_(string[] args, bool showConsole = false)
+        {
+            AppDomain.CurrentDomain.UnhandledException += UnhandledExceptionEventHandler;
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+
+            if (args.Contains(URLHandlers.UrlRegistrationArgument))
+            {
+                //Passing in null will cause a NullRefrenceException if it tries to show the dialog 
+                //asking for elevation permission, but we want that to happen. Doing that keeps us 
+                //from getting in to a infinite loop of trying to register.
+                URLHandlers.RegisterURLHandler(null, null); 
+            }
+            else
+            {
+                new Main(args, user, showConsole);
+            }
+        }
+
+        public static void UnhandledExceptionEventHandler(Object sender, UnhandledExceptionEventArgs e)
+        {
+            var exception = e.ExceptionObject;
+
+            // Provide a stack backtrace, so our users and non-debugging devs can
+            // see what&#39;s gone wrong.
+            user.RaiseError(&quot;Unhandled exception:\n{0} &quot;, exception.ToString());
+            //Debugger.Break();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[16,9,16,10,0],[17,13,17,25,0],[18,9,18,10,0],[21,9,21,10,0],[22,13,22,90,0],[23,13,23,46,0],[24,13,24,66,0],[26,13,26,68,0],[27,13,27,14,0],[31,17,31,60,0],[32,13,32,14,0],[34,13,34,14,0],[35,17,35,51,0],[36,13,36,14,0],[37,9,37,10,0],[40,9,40,10,0],[41,13,41,47,0],[45,13,45,81,0],[47,9,47,10,0],[10,9,10,54,1]]);
+    </script>
+  </body>
+</html>

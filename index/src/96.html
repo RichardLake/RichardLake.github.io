@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\tests\ckan\types\releasestatus.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using NUnit.Framework;
+
+namespace CKANTests
+{
+    [TestFixture]
+    public class ReleaseStatus
+    {
+
+        // These get used by our tests, but we have to disable &#39;used only once&#39; (0414)
+        // to stop the compiler from giving us warnings.
+        #pragma warning disable 0414
+
+        private static string[] GoodStatuses = {
+            &quot;stable&quot;, &quot;testing&quot;, &quot;development&quot;
+        };
+
+        private static string[] BadStatuses = {
+            &quot;cheese&quot;, &quot;some thing I wrote last night&quot; , &quot;&quot;,
+            &quot;yo dawg I heard you like tests&quot;,
+            &quot;42&quot;
+        };
+
+        #pragma warning restore 0414
+
+        [Test][TestCaseSource(&quot;GoodStatuses&quot;)]
+        public void ReleaseGood(string status)
+        {
+            var release = new CKAN.ReleaseStatus(status);
+            Assert.IsInstanceOf&lt;CKAN.ReleaseStatus&gt;(release);
+            Assert.AreEqual(status, release.ToString());
+        }
+
+        [Test][TestCaseSource(&quot;BadStatuses&quot;)]
+        public void ReleaseBad(string status)
+        {
+            Assert.Throws&lt;CKAN.BadMetadataKraken&gt;(delegate
+            {
+                new CKAN.ReleaseStatus(status);
+            });
+        }
+
+        [Test]
+        public void Null()
+        {
+            // According to the spec, no release status means &quot;stable&quot;.
+            var release = new CKAN.ReleaseStatus(null);
+            Assert.AreEqual(&quot;stable&quot;, release.ToString());
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[39,13,39,14,0],[27,9,27,10,1],[28,13,28,58,1],[29,13,29,62,1],[30,13,30,57,1],[31,9,31,10,1],[35,9,35,10,1],[36,13,37,13,1],[37,14,38,17,1],[38,48,39,13,1],[39,14,39,16,1],[40,9,40,10,1],[44,9,44,10,1],[46,13,46,56,1],[47,13,47,59,1],[48,9,48,10,1],[13,9,15,11,1],[17,9,21,11,1],[37,13,37,14,1],[38,17,38,48,1]]);
+    </script>
+  </body>
+</html>

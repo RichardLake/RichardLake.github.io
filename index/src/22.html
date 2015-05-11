@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\relationships\sanitychecker.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Collections.Generic;
+using System.Linq;
+using log4net;
+
+namespace CKAN
+{
+    /// &lt;summary&gt;
+    /// Sanity checks on what mods we have installed, or may install.
+    /// &lt;/summary&gt;
+    public static class SanityChecker
+    {
+
+        private static readonly ILog log = LogManager.GetLogger(typeof(SanityChecker));
+
+        /// &lt;summary&gt;
+        ///     Checks the list of modules for consistency errors, returning a list of
+        ///     errors found. The list will be empty if everything is fine.
+        /// &lt;/summary&gt;
+        public static ICollection&lt;string&gt; ConsistencyErrors(IEnumerable&lt;Module&gt; modules, IEnumerable&lt;string&gt; dlls)
+        {
+            var errors = new HashSet&lt;string&gt;();
+
+            // If we have no modules, then everything is fine. DLLs can&#39;t depend or conflict on things.
+            if (modules == null)
+            {
+                return errors;
+            }
+
+            Dictionary&lt;string, List&lt;string&gt;&gt; providers = ModulesToProvides(modules, dlls);
+
+            foreach (KeyValuePair&lt;string,List&lt;Module&gt;&gt; entry in FindUnmetDependencies(modules, dlls))
+            {
+                foreach (Module unhappy_mod in entry.Value)
+                {
+                    errors.Add(string.Format(&quot;{0} requires {1} but nothing provides it&quot;, unhappy_mod.identifier, entry.Key));
+                }
+            }
+
+            // Conflicts are more difficult. Mods are allowed to conflict with themselves.
+            // So we walk all our mod conflicts, find what (if anything) provide those
+            // conflicts, and return false if it&#39;s not the module we&#39;re examining.
+
+            // TODO: This doesn&#39;t examine versions. We should!
+            // TODO: It would be great to factor this into its own function, too.
+
+            foreach (Module mod in modules)
+            {
+                // If our mod doesn&#39;t conflict with anything, skip it.
+                if (mod.conflicts == null)
+                {
+                    continue;
+                }
+
+                foreach (var conflict in mod.conflicts)
+                {
+                    // If nothing conflicts with us, skip.
+                    if (! providers.ContainsKey(conflict.name))
+                    {
+                        continue;
+                    }
+
+                    // If something does conflict with us, and it&#39;s not ourselves, that&#39;s a fail.
+                    foreach (string provider in providers[conflict.name])
+                    {
+                        if (provider != mod.identifier)
+                        {
+                            errors.Add(string.Format(&quot;{0} conflicts with {1}.&quot;, mod.identifier, provider));
+                        }
+                    }
+                }
+            }
+
+            // Return whatever we&#39;ve found, which could be empty.
+            return errors;
+        }
+
+        /// &lt;summary&gt;
+        /// Ensures all modules in the list provided can co-exist.
+        /// Throws a InconsistentKraken containing a list of inconsistences if they do not.
+        /// Does nothing if the modules can happily co-exist.
+        /// &lt;/summary&gt;
+        public static void EnforceConsistency(IEnumerable&lt;Module&gt; modules, IEnumerable&lt;string&gt; dlls = null)
+        {
+            ICollection&lt;string&gt; errors = ConsistencyErrors(modules, dlls);
+
+            if (errors.Count != 0)
+            {
+                throw new InconsistentKraken(errors);
+            }
+        }
+    
+        /// &lt;summary&gt;
+        /// Returns true if the mods supplied can co-exist. This checks depends/pre-depends/conflicts only.
+        /// &lt;/summary&gt;
+        public static bool IsConsistent(IEnumerable&lt;Module&gt; modules, IEnumerable&lt;string&gt; dlls = null)
+        {
+            return ConsistencyErrors(modules, dlls).Count == 0;
+        }
+
+        /// &lt;summary&gt;
+        /// Maps a list of modules and dlls to a dictionary of what&#39;s provided, and a list of
+        /// identifiers that supply each.
+        /// &lt;/summary&gt;
+        // 
+        // Eg: {
+        //          LifeSupport =&gt; [ &quot;TACLS&quot;, &quot;Snacks&quot; ]
+        //          DogeCoinFlag =&gt; [ &quot;DogeCoinFlag&quot; ]
+        // }
+        public static Dictionary&lt;string, List&lt;string&gt;&gt; ModulesToProvides(IEnumerable&lt;Module&gt; modules, IEnumerable&lt;string&gt; dlls = null)
+        {
+            var providers = new Dictionary&lt;string, List&lt;string&gt;&gt;();
+
+            if (dlls == null)
+            {
+                dlls = new List&lt;string&gt;();
+            }
+
+            foreach (Module mod in modules)
+            {
+                foreach (string provides in mod.ProvidesList)
+                {
+                    log.DebugFormat(&quot;{0} provides {1}&quot;, mod, provides);
+                    providers[provides] = providers.ContainsKey(provides) ? providers[provides] : new List&lt;string&gt;();
+                    providers[provides].Add(mod.identifier);
+                }
+            }
+
+            // Add in our DLLs as things we know exist.
+            foreach (string dll in dlls)
+            {
+                if (! providers.ContainsKey(dll))
+                {
+                    providers[dll] = new List&lt;string&gt;();
+                }
+                providers[dll].Add(dll);
+            }
+
+            return providers;
+        }
+
+        /// &lt;summary&gt;
+        /// Given a list of modules and optional dlls, returns a dictionary of dependencies which are still not met.
+        /// The dictionary keys are the un-met depdendencies, the values are the modules requesting them.
+        /// &lt;/summary&gt;
+        public static Dictionary&lt;string,List&lt;Module&gt;&gt; FindUnmetDependencies(IEnumerable&lt;Module&gt; modules, IEnumerable&lt;string&gt; dlls = null)
+        {
+            return FindUnmetDependencies(modules, ModulesToProvides(modules, dlls));
+        }
+
+        /// &lt;summary&gt;
+        /// Given a list of modules, and a dictionary of providers, returns a dictionary of depdendencies which have not been met.
+        /// &lt;/summary&gt;
+        internal static Dictionary&lt;string,List&lt;Module&gt;&gt; FindUnmetDependencies(IEnumerable&lt;Module&gt; modules, Dictionary&lt;string,List&lt;string&gt;&gt; provided)
+        {
+            return FindUnmetDependencies(modules, new HashSet&lt;string&gt; (provided.Keys));
+        }
+
+        /// &lt;summary&gt;
+        /// Given a list of modules, and a set of providers, returns a dictionary of dependencies which have not been met.
+        /// &lt;/summary&gt;
+        internal static Dictionary&lt;string,List&lt;Module&gt;&gt; FindUnmetDependencies(IEnumerable&lt;Module&gt; modules, HashSet&lt;string&gt; provided)
+        {
+            var unmet = new Dictionary&lt;string,List&lt;Module&gt;&gt; ();
+
+            // TODO: This doesn&#39;t examine versions, it should!
+
+            foreach (Module mod in modules)
+            {
+                // If this module has no dependencies, we&#39;re done.
+                if (mod.depends == null)
+                {
+                    continue;
+                }
+
+                // If it does have dependencies, but we can&#39;t find anything that provides them,
+                // add them to our unmet list.
+                foreach (RelationshipDescriptor dep in mod.depends.Where(dep =&gt; ! provided.Contains(dep.name)))
+                {
+                    if (!unmet.ContainsKey(dep.name))
+                    {
+                        unmet[dep.name] = new List&lt;Module&gt;();
+                    }
+                    unmet[dep.name].Add(mod); // mod needs dep.name, but doesn&#39;t have it.
+                }
+            }
+
+            return unmet;
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[87,13,87,14,0],[88,17,88,54,0],[20,9,20,10,1],[21,13,21,48,1],[24,13,24,33,1],[25,13,25,14,1],[26,17,26,31,1],[29,13,29,91,1],[31,13,31,20,1],[31,65,31,101,1],[31,22,31,61,1],[32,13,32,14,1],[33,17,33,24,1],[33,48,33,59,1],[33,26,33,44,1],[34,17,34,18,1],[35,21,35,126,1],[36,17,36,18,1],[33,45,33,47,1],[37,13,37,14,1],[31,62,31,64,1],[46,13,46,20,1],[46,36,46,43,1],[46,22,46,32,1],[47,13,47,14,1],[49,17,49,43,1],[50,17,50,18,1],[51,21,51,30,1],[54,17,54,24,1],[54,42,54,55,1],[54,26,54,38,1],[55,17,55,18,1],[57,21,57,64,1],[58,21,58,22,1],[59,25,59,34,1],[63,21,63,28,1],[63,49,63,73,1],[63,30,63,45,1],[64,21,64,22,1],[65,25,65,56,1],[66,25,66,26,1],[67,29,67,108,1],[68,25,68,26,1],[69,21,69,22,1],[63,46,63,48,1],[70,17,70,18,1],[54,39,54,41,1],[71,13,71,14,1],[46,33,46,35,1],[74,13,74,27,1],[75,9,75,10,1],[83,9,83,10,1],[84,13,84,75,1],[86,13,86,35,1],[90,9,90,10,1],[96,9,96,10,1],[97,13,97,64,1],[98,9,98,10,1],[110,9,110,10,1],[111,13,111,68,1],[113,13,113,30,1],[114,13,114,14,1],[115,17,115,43,1],[116,13,116,14,1],[118,13,118,20,1],[118,36,118,43,1],[118,22,118,32,1],[119,13,119,14,1],[120,17,120,24,1],[120,45,120,61,1],[120,26,120,41,1],[121,17,121,18,1],[122,21,122,72,1],[123,21,123,118,1],[124,21,124,61,1],[125,17,125,18,1],[120,42,120,44,1],[126,13,126,14,1],[118,33,118,35,1],[129,13,129,20,1],[129,36,129,40,1],[129,22,129,32,1],[130,13,130,14,1],[131,17,131,50,1],[132,17,132,18,1],[133,21,133,57,1],[134,17,134,18,1],[135,17,135,41,1],[136,13,136,14,1],[129,33,129,35,1],[138,13,138,30,1],[139,9,139,10,1],[146,9,146,10,1],[147,13,147,85,1],[148,9,148,10,1],[154,9,154,10,1],[155,13,155,88,1],[156,9,156,10,1],[162,9,162,10,1],[163,13,163,64,1],[167,13,167,20,1],[167,36,167,43,1],[167,22,167,32,1],[168,13,168,14,1],[170,17,170,41,1],[171,17,171,18,1],[172,21,172,30,1],[177,17,177,24,1],[177,56,177,81,1],[177,110,177,111,1],[177,26,177,52,1],[178,17,178,18,1],[179,21,179,54,1],[180,21,180,22,1],[181,25,181,62,1],[182,21,182,22,1],[183,21,183,46,1],[184,17,184,18,1],[177,53,177,55,1],[185,13,185,14,1],[167,33,167,35,1],[187,13,187,26,1],[188,9,188,10,1],[13,9,13,88,1],[177,81,177,110,1]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\registry\registrymanager.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using ChinhDo.Transactions;
+using log4net;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
+namespace CKAN
+{
+    public class RegistryManager
+    {
+        private static readonly Dictionary&lt;string, RegistryManager&gt; singleton =
+            new Dictionary&lt;string, RegistryManager&gt;();
+
+        private static readonly ILog log = LogManager.GetLogger(typeof (RegistryManager));
+        private readonly string path;
+        private readonly TxFileManager file_transaction = new TxFileManager();
+
+        // The only reason we have a KSP field is so we can pass it to the registry
+        // when deserialising, and *it* only needs it to do registry upgrades.
+        // We could get rid of all of this if we declare we no longer wish to support
+        // older registry formats.
+        private KSP ksp;
+
+        public Registry registry;
+
+        // We require our constructor to be private so we can
+        // enforce this being an instance (via Instance() above)
+        private RegistryManager(string path, KSP ksp)
+        {
+            this.ksp = ksp;
+
+            this.path = Path.Combine(path, &quot;registry.json&quot;);
+            LoadOrCreate();
+
+            // We don&#39;t cause an inconsistency error to stop the registry from being loaded,
+            // because then the user can&#39;t do anything to correct it. However we&#39;re
+            // sure as hell going to complain if we spot one!
+            try {
+                registry.CheckSanity();
+            }
+            catch (InconsistentKraken kraken)
+            {
+                log.ErrorFormat(&quot;Loaded registry with inconsistencies:\n\n{0}&quot;, kraken.InconsistenciesPretty);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Returns an instance of the registry manager for the KSP install.
+        /// The file `registry.json` is assumed.
+        /// &lt;/summary&gt;
+        public static RegistryManager Instance(KSP ksp)
+        {
+            string directory = ksp.CkanDir();
+            if (!singleton.ContainsKey(directory))
+            {
+                log.DebugFormat(&quot;Preparing to load registry at {0}&quot;, directory);
+                singleton[directory] = new RegistryManager(directory, ksp);
+            }
+
+            return singleton[directory];
+        }
+
+        private void Load()
+        {
+
+            // Our registry needs to know our KSP install when upgrading from older
+            // registry formats. This lets us encapsulate that to make it available
+            // after deserialisation.
+            var settings = new JsonSerializerSettings
+            {
+                Context = new System.Runtime.Serialization.StreamingContext(
+                    System.Runtime.Serialization.StreamingContextStates.Other,
+                    ksp
+                )
+            };
+
+            string json = File.ReadAllText(path);
+            registry = JsonConvert.DeserializeObject&lt;Registry&gt;(json, settings);
+            log.DebugFormat(&quot;Loaded CKAN registry at {0}&quot;, path);
+        }
+
+        private void LoadOrCreate()
+        {
+            try
+            {
+                Load();
+            }
+            catch (FileNotFoundException)
+            {
+                Create();
+                Load();
+            }
+            catch (DirectoryNotFoundException)
+            {
+                Create();
+                Load();
+            }
+
+            AscertainDefaultRepo();
+        }
+
+        private void Create()
+        {
+            registry = Registry.Empty();
+            log.DebugFormat(&quot;Creating new CKAN registry at {0}&quot;, path);
+            Save();
+        }
+
+        private void AscertainDefaultRepo()
+        {
+            SortedDictionary&lt;string, Repository&gt; repositories = registry.Repositories;
+
+            if (repositories == null)
+            {
+                repositories = new SortedDictionary&lt;string, Repository&gt;();
+            }
+
+            // if (!(repositories.ContainsKey(Repository.default_ckan_repo_name)))
+            if (repositories.Count == 0)
+            {
+                repositories.Add(Repository.default_ckan_repo_name,
+                    new Repository(Repository.default_ckan_repo_name, Repository.default_ckan_repo_uri));
+            }
+
+            registry.Repositories = repositories;
+        }
+
+        private string Serialize()
+        {
+            StringBuilder sb = new StringBuilder();
+            StringWriter sw = new StringWriter(sb);
+
+            using (JsonTextWriter writer = new JsonTextWriter (sw))
+            {
+                writer.Formatting = Formatting.Indented;
+                writer.Indentation = 4;
+                writer.IndentChar = &#39; &#39;;
+
+                JsonSerializer serializer = new JsonSerializer();
+                serializer.Serialize(writer, registry);
+            }
+
+            return sw.ToString() + Environment.NewLine;
+        }
+
+        private string SerializeCurrentInstall()
+        {
+            // TODO how do we obtain the name of the current KSP instance?
+            string kspInstanceName = &quot;default&quot;;
+            string name = &quot;installed-&quot; + kspInstanceName;
+
+            JObject installed = new JObject ();
+            installed[&quot;spec_version&quot;] = &quot;v1.6&quot;;
+            installed[&quot;identifier&quot;] = name;
+            installed[&quot;version&quot;] =  DateTime.UtcNow.ToString(&quot;yyyy.MM.dd.hh.mm.ss&quot;);
+
+            installed[&quot;license&quot;] = &quot;unknown&quot;;
+            installed[&quot;name&quot;] = name;
+            installed[&quot;abstract&quot;] = &quot;A list of modules installed on the &quot; + kspInstanceName + &quot; KSP instance&quot;;
+            installed[&quot;kind&quot;] = &quot;metapackage&quot;;
+
+            JArray depends = new JArray ();
+            installed[&quot;depends&quot;] = depends;
+
+            foreach(KeyValuePair&lt;string, CKAN.Version&gt; module in registry.Installed())
+            {
+                if (!(CKAN.Version.AutodetectedDllString.Equals(module.Value.ToString())))
+                {
+                    JObject moduleJson = new JObject();
+                    moduleJson[&quot;name&quot;] = module.Key;
+                    moduleJson[&quot;version&quot;] = module.Value.ToString();
+
+                    depends.Add(moduleJson);
+                }
+            }
+
+            StringBuilder sb = new StringBuilder();
+            StringWriter sw = new StringWriter(sb);
+
+            using (JsonTextWriter writer = new JsonTextWriter (sw))
+            {
+                writer.Formatting = Formatting.Indented;
+                writer.Indentation = 4;
+                writer.IndentChar = &#39; &#39;;
+
+                JsonSerializer serializer = new JsonSerializer();
+                serializer.Serialize(writer, installed);
+            }
+
+            return sw.ToString() + Environment.NewLine;
+        }
+
+        public void Save(bool enforceConsistency = true)
+        {
+            log.DebugFormat(&quot;Saving CKAN registry at {0}&quot;, path);
+
+            if (enforceConsistency)
+            {
+                // No saving the registry unless it&#39;s in a sane state.
+                registry.CheckSanity();
+            }
+
+            string directoryPath = Path.GetDirectoryName(path);
+
+            if (directoryPath == null)
+            {
+                log.ErrorFormat(&quot;Failed to save registry, invalid path: {0}&quot;, path);
+                throw new DirectoryNotFoundKraken(path, &quot;Can&#39;t find a directory in &quot; + path);
+            }
+
+            if (!Directory.Exists(directoryPath))
+            {
+                Directory.CreateDirectory(directoryPath);
+            }
+
+            file_transaction.WriteAllText(path, Serialize());
+
+            // TODO how do we obtain the name of the current KSP instance?
+            string kspInstanceName = &quot;default&quot;;
+            string installedModsPath = Path.Combine (directoryPath, &quot;installed-&quot; + kspInstanceName + &quot;.ckan&quot;);
+            file_transaction.WriteAllText(installedModsPath, SerializeCurrentInstall());
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[44,13,44,46,0],[45,13,45,14,0],[46,17,46,111,0],[47,13,47,14,0],[96,13,96,47,0],[97,13,97,14,0],[98,17,98,26,0],[99,17,99,24,0],[100,13,100,14,0],[209,13,209,14,0],[210,17,210,85,0],[211,17,211,94,0],[215,13,215,14,0],[216,17,216,58,0],[217,13,217,14,0],[19,9,19,79,1],[31,9,31,54,1],[32,9,32,10,1],[33,13,33,28,1],[35,13,35,61,1],[36,13,36,28,1],[41,17,41,18,1],[42,17,42,40,1],[43,13,43,14,1],[48,9,48,10,1],[55,9,55,10,1],[56,13,56,46,1],[57,13,57,51,1],[58,13,58,14,1],[59,17,59,81,1],[60,17,60,76,1],[61,13,61,14,1],[63,13,63,41,1],[64,9,64,10,1],[67,9,67,10,1],[72,13,78,15,1],[80,13,80,50,1],[81,13,81,80,1],[82,13,82,66,1],[83,9,83,10,1],[86,9,86,10,1],[88,13,88,14,1],[89,17,89,24,1],[90,13,90,14,1],[91,13,91,42,1],[92,13,92,14,1],[93,17,93,26,1],[94,17,94,24,1],[95,13,95,14,1],[102,13,102,36,1],[103,9,103,10,1],[106,9,106,10,1],[107,13,107,41,1],[108,13,108,72,1],[109,13,109,20,1],[110,9,110,10,1],[113,9,113,10,1],[114,13,114,87,1],[116,13,116,38,1],[117,13,117,14,1],[118,17,118,75,1],[119,13,119,14,1],[122,13,122,41,1],[123,13,123,14,1],[124,17,125,106,1],[126,13,126,14,1],[128,13,128,50,1],[129,9,129,10,1],[132,9,132,10,1],[133,13,133,52,1],[134,13,134,52,1],[136,20,136,67,1],[137,13,137,14,1],[138,17,138,57,1],[139,17,139,40,1],[140,17,140,41,1],[142,17,142,66,1],[143,17,143,56,1],[144,13,144,14,1],[146,13,146,56,1],[147,9,147,10,1],[150,9,150,10,1],[152,13,152,48,1],[153,13,153,58,1],[155,13,155,48,1],[156,13,156,48,1],[157,13,157,44,1],[158,13,158,85,1],[160,13,160,46,1],[161,13,161,38,1],[162,13,162,111,1],[163,13,163,47,1],[165,13,165,44,1],[166,13,166,44,1],[168,13,168,20,1],[168,66,168,86,1],[168,21,168,62,1],[169,13,169,14,1],[170,17,170,91,1],[171,17,171,18,1],[172,21,172,56,1],[173,21,173,53,1],[174,21,174,69,1],[176,21,176,45,1],[177,17,177,18,1],[178,13,178,14,1],[168,63,168,65,1],[180,13,180,52,1],[181,13,181,52,1],[183,20,183,67,1],[184,13,184,14,1],[185,17,185,57,1],[186,17,186,40,1],[187,17,187,41,1],[189,17,189,66,1],[190,17,190,57,1],[191,13,191,14,1],[193,13,193,56,1],[194,9,194,10,1],[197,9,197,10,1],[198,13,198,66,1],[200,13,200,36,1],[201,13,201,14,1],[203,17,203,40,1],[204,13,204,14,1],[206,13,206,64,1],[208,13,208,39,1],[214,13,214,50,1],[219,13,219,62,1],[222,13,222,48,1],[223,13,223,111,1],[224,13,224,89,1],[225,9,225,10,1],[14,9,15,55,1],[17,9,17,91,1]]);
+    </script>
+  </body>
+</html>

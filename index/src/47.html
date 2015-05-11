@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\controlfactory.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Diagnostics;
+using System.Threading;
+
+namespace CKAN
+{
+
+    // this class ensures that all controls are created from the same thread
+    // this is a mono limitation described here - http://www.mono-project.com/docs/faq/winforms/
+
+
+    public class ControlFactory
+    {
+
+        private int m_MainThreadID;
+
+        public ControlFactory()
+        {
+            m_MainThreadID = Thread.CurrentThread.ManagedThreadId;
+        }
+
+        public T CreateControl&lt;T&gt;() where T : new()
+        {
+            if (Thread.CurrentThread.ManagedThreadId != m_MainThreadID)
+            {
+                Debugger.Break();
+            }
+
+            return new T();
+        }
+        
+
+    }
+
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[16,9,16,32,0],[17,9,17,10,0],[18,13,18,67,0],[19,9,19,10,0],[22,9,22,10,0],[23,13,23,72,0],[24,13,24,14,0],[25,17,25,34,0],[26,13,26,14,0],[28,13,28,28,0],[29,9,29,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\net\repo.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using ChinhDo.Transactions;
+using ICSharpCode.SharpZipLib.GZip;
+using ICSharpCode.SharpZipLib.Tar;
+using ICSharpCode.SharpZipLib.Zip;
+using log4net;
+
+namespace CKAN
+{
+    /// &lt;summary&gt;
+    ///     Class for downloading the CKAN meta-info itself.
+    /// &lt;/summary&gt;
+    public static class Repo
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof (Repo));
+        private static TxFileManager file_transaction = new TxFileManager();
+
+        // Forward to keep existing code compiling, will be removed soon.
+        public static readonly Uri default_ckan_repo = CKAN.Repository.default_ckan_repo_uri;
+
+		internal static void ProcessRegistryMetadataFromJSON(string metadata, Registry registry, string filename)
+		{
+			log.DebugFormat(&quot;Converting metadata from JSON.&quot;);
+
+			try 
+			{
+				CkanModule module = CkanModule.FromJson(metadata);
+				log.InfoFormat(&quot;Found {0} version {1}&quot;, module.identifier, module.version);
+				registry.AddAvailable(module);
+			}
+			catch (Exception exception)
+			{
+				// Alas, we can get exceptions which *wrap* our exceptions,
+				// because json.net seems to enjoy wrapping rather than propagating.
+				// See KSP-CKAN/CKAN-meta#182 as to why we need to walk the whole
+				// exception stack.
+
+				bool handled = false;
+
+				while (exception != null)
+				{
+					if (exception is UnsupportedKraken || exception is BadMetadataKraken)
+					{
+						// Either of these can be caused by data meant for future
+						// clients, so they&#39;re not really warnings, they&#39;re just
+						// informational.
+
+						log.InfoFormat(&quot;Skipping {0} : {1}&quot;, filename, exception.Message);
+
+						// I&#39;d *love a way to &quot;return&quot; from the catch block.
+						handled = true;
+						break;
+					}
+
+					// Look further down the stack.
+					exception = exception.InnerException;
+				}
+
+				// If we haven&#39;t handled our exception, then it really was exceptional.
+				if (handled == false)
+				{
+					// In case whatever&#39;s calling us is lazy in error reporting, we&#39;ll
+					// report that we&#39;ve got an issue here.
+					log.ErrorFormat(&quot;Error processing {0} : {1}&quot;, filename, exception.Message);
+					throw;
+				}
+			}
+		}
+
+        /// &lt;summary&gt;
+        ///     Download and update the local CKAN meta-info.
+        ///     Optionally takes a URL to the zipfile repo to download.
+        ///     Returns the number of unique modules updated.
+        /// &lt;/summary&gt;
+        public static int UpdateAllRepositories(RegistryManager registry_manager, KSP ksp, IUser user)
+        {
+            // If we handle multiple repositories, we will call ClearRegistry() ourselves...
+            registry_manager.registry.ClearAvailable();
+            // TODO this should already give us a pre-sorted list
+            SortedDictionary&lt;string, Repository&gt; sortedRepositories = registry_manager.registry.Repositories;
+            foreach (KeyValuePair&lt;string, Repository&gt; repository in sortedRepositories)
+            {
+                log.InfoFormat(&quot;About to update {0}&quot;, repository.Value.name);
+                UpdateRegistry(repository.Value.uri, registry_manager.registry, ksp, user, false);
+            }
+
+            // Return how many we got!
+            return registry_manager.registry.Available(ksp.Version()).Count;
+        }
+
+        public static int Update(RegistryManager registry_manager, KSP ksp, IUser user, Boolean clear = true, Uri repo = null)
+        {
+            // Use our default repo, unless we&#39;ve been told otherwise.
+            if (repo == null)
+            {
+                repo = default_ckan_repo;
+            }
+
+            UpdateRegistry(repo, registry_manager.registry, ksp, user, clear);
+
+            // Save our changes!
+            registry_manager.Save();
+
+            // Return how many we got!
+            return registry_manager.registry.Available(ksp.Version()).Count;
+        }
+
+        public static int Update(RegistryManager registry_manager, KSP ksp, IUser user, Boolean clear = true, string repo = null)
+        {
+            if (repo == null)
+            {
+                return Update(registry_manager, ksp, user, clear, (Uri)null);
+            }
+
+            return Update(registry_manager, ksp, user, clear, new Uri(repo));
+        }
+
+        /// &lt;summary&gt;
+        /// Updates the supplied registry from the URL given.
+        /// This does not *save* the registry. For that, you probably want Repo.Update
+        /// &lt;/summary&gt;
+        internal static void UpdateRegistry(Uri repo, Registry registry, KSP ksp, IUser user, Boolean clear = true)
+        {
+            log.InfoFormat(&quot;Downloading {0}&quot;, repo);
+
+            string repo_file = Net.Download(repo);
+
+            // Clear our list of known modules.
+            var old_available = registry.available_modules;
+            if (clear)
+            {
+                registry.ClearAvailable();
+            }
+
+			// Check the filetype.
+			FileType type = FileIdentifier.IdentifyFile(repo_file);
+
+			switch (type)
+			{
+			case FileType.TarGz:
+				UpdateRegistryFromTarGz (repo_file, registry);
+				break;
+			case FileType.Zip:
+				UpdateRegistryFromZip (repo_file, registry);
+				break;
+			default:
+				break;
+			}
+
+            List&lt;CkanModule&gt; metadataChanges = new List&lt;CkanModule&gt;();
+
+            foreach (var identifierModulePair in old_available)
+            {
+                var identifier = identifierModulePair.Key;
+
+                if (registry.IsInstalled(identifier))
+                {
+                    var installedVersion = registry.InstalledVersion(identifier);
+                    if (!(registry.available_modules.ContainsKey(identifier)))
+                    {
+                        log.InfoFormat(&quot;UpdateRegistry, module {0}, version {1} not in repository ({2})&quot;, identifier, installedVersion, repo);
+                        continue;
+                    }
+
+                    if (!registry.available_modules[identifier].module_version.ContainsKey(installedVersion))
+                    {
+                        continue;
+                    }
+
+                    // if the mod is installed and the metadata is different we have to reinstall it
+                    var metadata = registry.available_modules[identifier].module_version[installedVersion];
+
+                    if (!old_available.ContainsKey(identifier) ||
+                        !old_available[identifier].module_version.ContainsKey(installedVersion))
+                    {
+                        continue;
+                    }
+
+                    var oldMetadata = old_available[identifier].module_version[installedVersion];
+
+                    bool same = true;
+                    if ((metadata.install == null) != (oldMetadata.install == null) ||
+                        (metadata.install != null &amp;&amp; metadata.install.Length != oldMetadata.install.Length))
+                    {
+                        same = false;
+                    }
+                    else
+                    {
+                        if(metadata.install != null)
+                        for (int i = 0; i &lt; metadata.install.Length; i++)
+                        {
+                            if (metadata.install[i].file != oldMetadata.install[i].file)
+                            {
+                                same = false;
+                                break;
+                            }
+
+                            if (metadata.install[i].install_to != oldMetadata.install[i].install_to)
+                            {
+                                same = false;
+                                break;
+                            }
+
+                            if ((metadata.install[i].filter == null) != (oldMetadata.install[i].filter == null))
+                            {
+                                same = false;
+                                break;
+                            }
+
+                            if(metadata.install[i].filter != null)
+                            if (!metadata.install[i].filter.SequenceEqual(oldMetadata.install[i].filter))
+                            {
+                                same = false;
+                                break;
+                            }
+
+                            if ((metadata.install[i].filter_regexp == null) != (oldMetadata.install[i].filter_regexp == null))
+                            {
+                                same = false;
+                                break;
+                            }
+
+                            if(metadata.install[i].filter_regexp != null)
+                            if (!metadata.install[i].filter_regexp.SequenceEqual(oldMetadata.install[i].filter_regexp))
+                            {
+                                same = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!same)
+                    {
+                        metadataChanges.Add(registry.available_modules[identifier].module_version[installedVersion]);
+                    }
+                }
+            }
+
+            if (metadataChanges.Any())
+            {
+                string mods = &quot;&quot;;
+                for (int i = 0; i &lt; metadataChanges.Count; i++)
+                {
+                    mods += metadataChanges[i].identifier + &quot; &quot;
+                        + metadataChanges[i].version.ToString() + ((i &lt; metadataChanges.Count-1) ? &quot;, &quot; : &quot;&quot;);
+                }
+
+                if(user.RaiseYesNoDialog(String.Format(
+                    @&quot;The following mods have had their metadata changed since last update - {0}.
+It is advisable that you reinstall them in order to preserve consistency with the repository. Do you wish to reinstall now?&quot;, mods)))
+                {
+                    ModuleInstaller installer = ModuleInstaller.GetInstance(ksp, new NullUser());
+                    installer.Upgrade(metadataChanges, new NetAsyncDownloader(new NullUser()));         
+                }
+            }
+
+            // Remove our downloaded meta-data now we&#39;ve processed it.
+            // Seems weird to do this as part of a transaction, but Net.Download uses them, so let&#39;s be consistent.
+            file_transaction.Delete(repo_file);
+        }
+
+		/// &lt;summary&gt;
+		/// Updates the supplied registry from the supplied zip file.
+		/// This will *clear* the registry of available modules first.
+		/// This does not *save* the registry. For that, you probably want Repo.Update
+		/// &lt;/summary&gt;
+		internal static void UpdateRegistryFromTarGz(string path, Registry registry)
+		{
+			log.DebugFormat(&quot;Starting registry update from tar.gz file: \&quot;{0}\&quot;.&quot;, path);
+
+			// Open the gzip&#39;ed file.
+			using (Stream inputStream = File.OpenRead(path))
+			{
+				// Create a gzip stream.
+				using (GZipInputStream gzipStream = new GZipInputStream(inputStream))
+				{
+					// Create a handle for the tar stream.
+					using (TarInputStream tarStream = new TarInputStream(gzipStream))
+					{
+						// Walk the archive, looking for .ckan files.
+						const string filter = @&quot;\.ckan$&quot;;
+
+						while (true)
+						{
+							TarEntry entry = tarStream.GetNextEntry();
+
+							// Check for EOF.
+							if (entry == null)
+							{
+								break;
+							}
+
+							string filename = entry.Name;
+
+							// Skip things we don&#39;t want.
+							if (!Regex.IsMatch(filename, filter))
+							{
+								log.DebugFormat(&quot;Skipping archive entry {0}&quot;, filename);
+								continue;
+							}
+
+							log.DebugFormat(&quot;Reading CKAN data from {0}&quot;, filename);
+
+							// Read each file into a buffer.
+							int buffer_size = 0;
+
+							try
+							{
+								buffer_size = Convert.ToInt32(entry.Size);
+							}
+							catch (OverflowException)
+							{
+								log.ErrorFormat(&quot;Error processing {0}: Metadata size too large.&quot;, entry.Name);
+								continue;
+							}
+
+							byte[] buffer = new byte[buffer_size];
+
+							tarStream.Read(buffer, 0, buffer_size);
+
+							// Convert the buffer data to a string.
+							string metadata_json = Encoding.ASCII.GetString(buffer);
+
+							ProcessRegistryMetadataFromJSON(metadata_json, registry, filename);
+						}
+					}
+				}
+			}
+		}
+
+		/// &lt;summary&gt;
+		/// Updates the supplied registry from the supplied zip file.
+		/// This will *clear* the registry of available modules first.
+		/// This does not *save* the registry. For that, you probably want Repo.Update
+		/// &lt;/summary&gt;
+		internal static void UpdateRegistryFromZip(string path, Registry registry)
+		{
+			log.DebugFormat(&quot;Starting registry update from zip file: \&quot;{0}\&quot;.&quot;, path);
+
+			using (var zipfile = new ZipFile(path))
+			{
+				// Walk the archive, looking for .ckan files.
+				const string filter = @&quot;\.ckan$&quot;;
+
+				foreach (ZipEntry entry in zipfile)
+				{
+					string filename = entry.Name;
+
+					// Skip things we don&#39;t want.
+					if (! Regex.IsMatch(filename, filter))
+					{
+						log.DebugFormat(&quot;Skipping archive entry {0}&quot;, filename);
+						continue;
+					}
+
+					log.DebugFormat(&quot;Reading CKAN data from {0}&quot;, filename);
+
+					// Read each file into a string.
+					string metadata_json;
+					using (var stream = new StreamReader(zipfile.GetInputStream(entry)))
+					{
+						metadata_json = stream.ReadToEnd();
+						stream.Close();
+					}
+
+					ProcessRegistryMetadataFromJSON(metadata_json, registry, filename);
+				}
+
+				zipfile.Close();
+			}
+		}
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[61,6,61,43,0],[62,5,62,6,0],[66,5,66,6,0],[69,6,69,81,0],[70,6,70,12,0],[81,9,81,10,0],[83,13,83,56,0],[85,13,85,110,0],[86,13,86,20,0],[86,69,86,87,0],[86,22,86,65,0],[87,13,87,14,0],[88,17,88,78,0],[89,17,89,99,0],[90,13,90,14,0],[86,66,86,68,0],[93,13,93,77,0],[94,9,94,10,0],[97,9,97,10,0],[99,13,99,30,0],[100,13,100,14,0],[101,17,101,42,0],[102,13,102,14,0],[104,13,104,79,0],[107,13,107,37,0],[110,13,110,77,0],[111,9,111,10,0],[114,9,114,10,0],[115,13,115,30,0],[116,13,116,14,0],[117,17,117,78,0],[120,13,120,78,0],[121,9,121,10,0],[152,5,152,11,0],[157,22,157,46,0],[158,13,158,14,0],[159,17,159,59,0],[161,17,161,54,0],[162,17,162,18,0],[163,21,163,82,0],[164,21,164,79,0],[165,21,165,22,0],[166,25,166,143,0],[167,25,167,34,0],[170,21,170,110,0],[171,21,171,22,0],[172,25,172,34,0],[176,21,176,108,0],[178,21,179,97,0],[180,21,180,22,0],[181,25,181,34,0],[184,21,184,98,0],[186,21,186,38,0],[187,21,188,109,0],[189,21,189,22,0],[190,25,190,38,0],[191,21,191,22,0],[193,21,193,22,0],[194,25,194,53,0],[195,30,195,39,0],[196,25,196,26,0],[197,29,197,89,0],[198,29,198,30,0],[199,33,199,46,0],[200,33,200,39,0],[203,29,203,101,0],[204,29,204,30,0],[205,33,205,46,0],[206,33,206,39,0],[209,29,209,113,0],[210,29,210,30,0],[211,33,211,46,0],[212,33,212,39,0],[215,29,215,67,0],[216,29,216,106,0],[217,29,217,30,0],[218,33,218,46,0],[219,33,219,39,0],[222,29,222,127,0],[223,29,223,30,0],[224,33,224,46,0],[225,33,225,39,0],[228,29,228,74,0],[229,29,229,120,0],[230,29,230,30,0],[231,33,231,46,0],[232,33,232,39,0],[234,25,234,26,0],[195,70,195,73,0],[195,41,195,68,0],[235,21,235,22,0],[237,21,237,31,0],[238,21,238,22,0],[239,25,239,118,0],[240,21,240,22,0],[241,17,241,18,0],[242,13,242,14,0],[245,13,245,14,0],[246,17,246,34,0],[247,22,247,31,0],[248,17,248,18,0],[249,21,250,111,0],[251,17,251,18,0],[247,60,247,63,0],[247,33,247,58,0],[253,17,255,134,0],[256,17,256,18,0],[257,21,257,98,0],[258,21,258,96,0],[259,17,259,18,0],[260,13,260,14,0],[316,8,316,33,0],[317,8,317,9,0],[318,9,318,87,0],[319,9,319,18,0],[27,3,27,4,1],[28,4,28,54,1],[31,4,31,5,1],[32,5,32,55,1],[33,5,33,80,1],[34,5,34,35,1],[35,4,35,5,1],[36,4,36,31,1],[37,4,37,5,1],[43,5,43,26,1],[46,5,46,6,1],[47,6,47,75,1],[48,6,48,7,1],[53,7,53,73,1],[56,7,56,22,1],[57,7,57,13,1],[45,5,45,30,1],[65,5,65,26,1],[72,4,72,5,1],[73,3,73,4,1],[128,9,128,10,1],[129,13,129,53,1],[131,13,131,51,1],[134,13,134,60,1],[135,13,135,23,1],[136,13,136,14,1],[137,17,137,43,1],[138,13,138,14,1],[141,4,141,59,1],[143,4,143,17,1],[146,5,146,51,1],[147,5,147,11,1],[149,5,149,49,1],[150,5,150,11,1],[155,13,155,71,1],[157,13,157,20,1],[157,50,157,63,1],[157,47,157,49,1],[244,13,244,39,1],[264,13,264,48,1],[265,9,265,10,1],[273,3,273,4,1],[274,4,274,81,1],[277,11,277,51,1],[278,4,278,5,1],[280,12,280,73,1],[281,5,281,6,1],[283,13,283,70,1],[284,6,284,7,1],[289,7,289,8,1],[290,8,290,50,1],[293,8,293,26,1],[294,8,294,9,1],[295,9,295,15,1],[298,8,298,37,1],[301,8,301,45,1],[302,8,302,9,1],[303,9,303,65,1],[304,9,304,18,1],[307,8,307,64,1],[310,8,310,28,1],[313,8,313,9,1],[314,9,314,51,1],[315,8,315,9,1],[322,8,322,46,1],[324,8,324,47,1],[327,8,327,64,1],[329,8,329,75,1],[330,7,330,8,1],[288,7,288,19,1],[331,6,331,7,1],[332,5,332,6,1],[333,4,333,5,1],[334,3,334,4,1],[342,3,342,4,1],[343,4,343,78,1],[345,11,345,42,1],[346,4,346,5,1],[350,5,350,12,1],[350,32,350,39,1],[350,14,350,28,1],[351,5,351,6,1],[352,6,352,35,1],[355,6,355,44,1],[356,6,356,7,1],[357,7,357,63,1],[358,7,358,16,1],[361,6,361,62,1],[365,13,365,73,1],[366,6,366,7,1],[367,7,367,42,1],[368,7,368,22,1],[369,6,369,7,1],[371,6,371,73,1],[372,5,372,6,1],[350,29,350,31,1],[374,5,374,21,1],[375,4,375,5,1],[376,3,376,4,1],[20,9,20,80,1],[21,9,21,77,1],[24,9,24,94,1]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\ckaninflator.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using Newtonsoft.Json.Linq;
+
+namespace CKAN.NetKAN
+{
+    // Assurances that given the metadata, the mod version, and the filename,
+    // we will *modify* the metadata with whatever we&#39;ve picked up from our
+    // API.
+
+    public abstract class CkanInflator
+    {
+        public abstract void InflateMetadata(JObject metadata, string filename, object context);
+
+        // Inflate will add a value, but only if that key is not
+        // already filled with something else.
+
+        internal static void Inflate(JObject metadata, string key, string value)
+        {
+            if (metadata[key] == null)
+            {
+                metadata[key] = value;
+            }
+        }
+
+        internal static void Inflate(JObject metadata, string key, long value)
+        {
+            if (metadata[key] == null)
+            {
+                metadata[key] = value;
+            }
+        }
+
+    }    
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[17,9,17,10,0],[18,13,18,39,0],[19,13,19,14,0],[20,17,20,39,0],[21,13,21,14,0],[22,9,22,10,0],[25,9,25,10,0],[26,13,26,39,0],[27,13,27,14,0],[28,17,28,39,0],[29,13,29,14,0],[30,9,30,10,0]]);
+    </script>
+  </body>
+</html>

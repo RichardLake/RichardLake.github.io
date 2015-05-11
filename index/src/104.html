@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\tests\ckan\relationships\relationshipresolver.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using CKAN;
+using Version = CKAN.Version;
+using NUnit.Framework;
+
+namespace Tests.CKAN.Relationships
+{
+    [TestFixture]
+    public class RelationshipResolverTests
+    {
+        private Registry registry;
+        private RelationshipResolverOptions options;
+        private RandomModuleGenerator generator;
+
+        [SetUp]
+        public void Setup()
+        {
+            registry = Registry.Empty();
+            options = RelationshipResolver.DefaultOpts();
+            generator = new RandomModuleGenerator(new Random(0451));
+            //Sanity checker means even incorrect RelationshipResolver logic was passing
+            options.without_enforce_consistency = true;
+        }
+
+        [Test]
+        public void Constructor_WithoutModules_AlwaysReturns()
+        {
+            registry = Registry.Empty();
+            options = RelationshipResolver.DefaultOpts();
+            Assert.DoesNotThrow(() =&gt; new RelationshipResolver(new List&lt;string&gt;(),
+                options,
+                registry,
+                null));
+        }
+
+        [Test]
+        public void Constructor_WithConflictingModules()
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule();
+            var mod_b = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=mod_a.identifier}
+            });
+
+            list.Add(mod_a.identifier);
+            list.Add(mod_b.identifier);
+            AddToRegistry(mod_a, mod_b);
+            
+            Assert.Throws&lt;InconsistentKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+
+
+            options.procede_with_inconsistencies = true;
+            var resolver = new RelationshipResolver(list, options, registry, null);
+
+            Assert.That(resolver.ConflictList.Any(s =&gt; Equals(s.Key, mod_a)));
+            Assert.That(resolver.ConflictList.Any(s =&gt; Equals(s.Key, mod_b)));
+            Assert.That(resolver.ConflictList, Has.Count.EqualTo(2));
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        public void Constructor_WithConflictingModulesVersion_Throws()
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule();
+            var mod_b = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=mod_a.identifier, version=mod_a.version.ToString()}
+            });
+
+            list.Add(mod_a.identifier);
+            list.Add(mod_b.identifier);
+            AddToRegistry(mod_a, mod_b);
+
+            Assert.Throws&lt;InconsistentKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;0.5&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;1.0&quot;)]
+        public void Constructor_WithConflictingModulesVersionMin_Throws(string ver, string conf_min)
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule(version: new Version(ver));
+            var mod_b = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=mod_a.identifier, min_version=conf_min}
+            });
+
+            list.Add(mod_a.identifier);
+            list.Add(mod_b.identifier);
+            AddToRegistry(mod_a, mod_b);
+
+            Assert.Throws&lt;InconsistentKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;2.0&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;1.0&quot;)]
+        public void Constructor_WithConflictingModulesVersionMax_Throws(string ver, string conf_max)
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule(version: new Version(ver));
+            var mod_b = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=mod_a.identifier, max_version=conf_max}
+            });
+
+            list.Add(mod_a.identifier);
+            list.Add(mod_b.identifier);
+            AddToRegistry(mod_a, mod_b);
+
+            Assert.Throws&lt;InconsistentKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;0.5&quot;, &quot;2.0&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;1.0&quot;, &quot;2.0&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;0.5&quot;, &quot;1.0&quot;)]
+        public void Constructor_WithConflictingModulesVersionMinMax_Throws(string ver, string conf_min, string conf_max)
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule(version: new Version(ver));
+            var mod_b = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=mod_a.identifier, min_version=conf_min, max_version=conf_max}
+            });
+
+            list.Add(mod_a.identifier);
+            list.Add(mod_b.identifier);
+            AddToRegistry(mod_a, mod_b);
+
+            Assert.Throws&lt;InconsistentKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;0.5&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;2.0&quot;)]
+        public void Constructor_WithNonConflictingModulesVersion_DoesNotThrows(string ver, string conf)
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule(version: new Version(ver));
+            var mod_b = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=mod_a.identifier, version=conf}
+            });
+
+            list.Add(mod_a.identifier);
+            list.Add(mod_b.identifier);
+            AddToRegistry(mod_a, mod_b);
+
+            Assert.DoesNotThrow(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;2.0&quot;)]
+        public void Constructor_WithConflictingModulesVersionMin_DoesNotThrows(string ver, string conf_min)
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule(version: new Version(ver));
+            var mod_b = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=mod_a.identifier, min_version=&quot;2.0&quot;}
+            });
+
+            list.Add(mod_a.identifier);
+            list.Add(mod_b.identifier);
+            AddToRegistry(mod_a, mod_b);
+
+            Assert.DoesNotThrow(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;2.0&quot;)]
+        public void Constructor_WithConflictingModulesVersionMax_DoesNotThrows(string ver, string conf_max)
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule(version: new Version(ver));
+            var mod_b = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=mod_a.identifier, max_version=conf_max}
+            });
+
+            list.Add(mod_a.identifier);
+            list.Add(mod_b.identifier);
+            AddToRegistry(mod_a, mod_b);
+
+            Assert.DoesNotThrow(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;2.0&quot;, &quot;3.0&quot;)]
+        [TestCase(&quot;4.0&quot;, &quot;2.0&quot;, &quot;3.0&quot;)]
+        public void Constructor_WithConflictingModulesVersionMinMax_DoesNotThrows(string ver, string conf_min, string conf_max)
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule(version: new Version(ver));
+            var mod_b = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=mod_a.identifier, min_version=conf_min, max_version=conf_max}
+            });
+
+            list.Add(mod_a.identifier);
+            list.Add(mod_b.identifier);
+            AddToRegistry(mod_a, mod_b);
+
+            Assert.DoesNotThrow(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+        }
+
+        [Test]
+        public void Constructor_WithMultipleModulesProviding_Throws()
+        {
+            options.without_toomanyprovides_kraken = false;
+
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule();
+            var mod_b = generator.GeneratorRandomModule(provides: new List&lt;string&gt;
+            {
+                mod_a.identifier
+            });
+            var mod_c = generator.GeneratorRandomModule(provides: new List&lt;string&gt;
+            {
+                mod_a.identifier
+            });
+            var mod_d = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=mod_a.identifier}
+            });
+
+            list.Add(mod_d.identifier);
+            AddToRegistry(mod_b, mod_c, mod_d);
+            Assert.Throws&lt;TooManyModsProvideKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+
+        }
+
+        [Test]
+        public void Constructor_WithMissingModules_Throws()
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule();
+            list.Add(mod_a.identifier);
+
+            Assert.Throws&lt;ModuleNotFoundKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+
+        }
+
+        // Right now our RR always returns the modules it was provided. However
+        // if we&#39;ve already got the same version(s) installed, it should be able to
+        // return a list *without* them. This isn&#39;t a hard error at the moment,
+        // since ModuleInstaller.InstallList will ignore already installed mods, but
+        // it would be nice to have. Discussed a little in GH #521.
+        [Test][Category(&quot;TODO&quot;)][Explicit]
+        public void ModList_WithInstalledModules_DoesNotContainThem()
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule();
+            list.Add(mod_a.identifier);
+            AddToRegistry(mod_a);
+            registry.Installed().Add(mod_a.identifier, mod_a.version);
+
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            CollectionAssert.IsEmpty(relationship_resolver.ModList());
+        }
+
+        [Test]
+        public void ModList_WithInstalledModulesSugested_DoesNotContainThem()
+        {
+            options.with_all_suggests = true;
+            var list = new List&lt;string&gt;();
+            var sugested = generator.GeneratorRandomModule();
+            var sugester = generator.GeneratorRandomModule(sugests: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = sugested.identifier}
+            });
+
+            list.Add(sugester.identifier);
+            AddToRegistry(sugester, sugested);
+            registry.Installed().Add(sugested.identifier, sugested.version);
+
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            CollectionAssert.Contains(relationship_resolver.ModList(), sugested);
+        }
+
+        [Test]
+        public void ModList_WithSugestedModulesThatWouldConflict_DoesNotContainThem()
+        {
+            options.with_all_suggests = true;
+            var list = new List&lt;string&gt;();
+            var sugested = generator.GeneratorRandomModule();
+            var mod = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = sugested.identifier}
+            });
+            var sugester = generator.GeneratorRandomModule(sugests: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = sugested.identifier}
+            });
+
+            list.Add(sugester.identifier);
+            list.Add(mod.identifier);
+            AddToRegistry(sugester, sugested, mod);
+
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            CollectionAssert.DoesNotContain(relationship_resolver.ModList(), sugested);
+        }
+
+        [Test]
+        public void Constructor_WithConflictingModulesInDependancies_ThrowUnderDefaultSettings()
+        {
+            var list = new List&lt;string&gt;();
+            var dependant = generator.GeneratorRandomModule();
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = dependant.identifier}
+            });
+            var conflicts_with_dependant = generator.GeneratorRandomModule(conflicts: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name=dependant.identifier}
+            });
+
+
+            list.Add(depender.identifier);
+            list.Add(conflicts_with_dependant.identifier);
+            AddToRegistry(depender, dependant, conflicts_with_dependant);
+
+            Assert.Throws&lt;InconsistentKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+        }
+
+        [Test]
+        public void Constructor_WithSuggests_HasSugestedInModlist()
+        {
+            options.with_all_suggests = true;
+            var list = new List&lt;string&gt;();
+            var sugested = generator.GeneratorRandomModule();
+            var sugester = generator.GeneratorRandomModule(sugests: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = sugested.identifier}
+            });
+
+            list.Add(sugester.identifier);
+            AddToRegistry(sugester, sugested);
+
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            CollectionAssert.Contains(relationship_resolver.ModList(), sugested);
+        }
+
+        [Test]
+        public void Constructor_ContainsSugestedOfSugested_When_With_all_suggests()
+        {
+            options.with_all_suggests = true;
+            var list = new List&lt;string&gt;();
+            var sugested2 = generator.GeneratorRandomModule();
+            var sugested = generator.GeneratorRandomModule(sugests: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = sugested2.identifier}
+            });
+            var sugester = generator.GeneratorRandomModule(sugests: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = sugested.identifier}
+            });
+
+            list.Add(sugester.identifier);
+            AddToRegistry(sugester, sugested, sugested2);
+
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            CollectionAssert.Contains(relationship_resolver.ModList(), sugested2);
+
+            options.with_all_suggests = false;
+
+            relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            CollectionAssert.DoesNotContain(relationship_resolver.ModList(), sugested2);
+        }
+
+        [Test]
+        public void Constructor_ProvidesSatisfyDependencies()
+        {
+            var list = new List&lt;string&gt;();
+            var mod_a = generator.GeneratorRandomModule();
+            var mod_b = generator.GeneratorRandomModule(provides: new List&lt;string&gt;
+            {
+                mod_a.identifier
+            });
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = mod_a.identifier}
+            });
+            list.Add(depender.identifier);
+            AddToRegistry(mod_b, depender);
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+
+            CollectionAssert.AreEquivalent(relationship_resolver.ModList(), new List&lt;CkanModule&gt;
+            {
+                mod_b,
+                depender
+            });
+
+        }
+
+
+        [Test]
+        public void Constructor_WithMissingDependants_Throws()
+        {
+            var list = new List&lt;string&gt;();
+            var dependant = generator.GeneratorRandomModule();
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = dependant.identifier}
+            });
+            list.Add(depender.identifier);
+            registry.AddAvailable(depender);
+
+            Assert.Throws&lt;ModuleNotFoundKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;2.0&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;0.2&quot;)]
+        [TestCase(&quot;0&quot;, &quot;0.2&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;0&quot;)]
+        public void Constructor_WithMissingDependantsVersion_Throws(string ver, string dep)
+        {
+            var list = new List&lt;string&gt;();
+            var dependant = generator.GeneratorRandomModule(version: new Version(ver));
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = dependant.identifier, version = dep}
+            });
+            list.Add(depender.identifier);
+            list.Add(dependant.identifier);
+            AddToRegistry(depender, dependant);
+
+            Assert.Throws&lt;ModuleNotFoundKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;2.0&quot;)]
+        public void Constructor_WithMissingDependantsVersionMin_Throws(string ver, string dep_min)
+        {
+            var list = new List&lt;string&gt;();
+            var dependant = generator.GeneratorRandomModule(version: new Version(ver));
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = dependant.identifier, min_version = dep_min}
+            });
+            list.Add(depender.identifier);
+            list.Add(dependant.identifier);
+            AddToRegistry(depender, dependant);
+
+            Assert.Throws&lt;ModuleNotFoundKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;0.5&quot;)]
+        public void Constructor_WithMissingDependantsVersionMax_Throws(string ver, string dep_max)
+        {
+            var list = new List&lt;string&gt;();
+            var dependant = generator.GeneratorRandomModule(version: new Version(ver));
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = dependant.identifier, max_version = dep_max}
+            });
+            list.Add(depender.identifier);
+            list.Add(dependant.identifier);
+            AddToRegistry(depender, dependant);
+
+            Assert.Throws&lt;ModuleNotFoundKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;2.0&quot;, &quot;3.0&quot;)]
+        [TestCase(&quot;4.0&quot;, &quot;2.0&quot;, &quot;3.0&quot;)]
+        public void Constructor_WithMissingDependantsVersionMinMax_Throws(string ver, string dep_min, string dep_max)
+        {
+            var list = new List&lt;string&gt;();
+            var dependant = generator.GeneratorRandomModule(version: new Version(ver));
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = dependant.identifier, min_version = dep_max}
+            });
+            list.Add(depender.identifier);
+            list.Add(dependant.identifier);
+            AddToRegistry(depender, dependant);
+
+            Assert.Throws&lt;ModuleNotFoundKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;1.0&quot;, &quot;2.0&quot;)]
+        [TestCase(&quot;1.0&quot;, &quot;1.0&quot;, &quot;0.5&quot;)]//what to do if a mod is present twice with the same version ?
+        public void Constructor_WithDependantVersion_ChooseCorrectly(string ver, string dep, string other)
+        {
+            var list = new List&lt;string&gt;();
+            var dependant = generator.GeneratorRandomModule(version: new Version(ver));
+            var other_dependant = generator.GeneratorRandomModule(identifier: dependant.identifier, version: new Version(other));
+
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = dependant.identifier, version = dep}
+            });
+
+            list.Add(depender.identifier);
+            list.Add(dependant.identifier);
+            list.Add(other_dependant.identifier);
+            AddToRegistry(depender, dependant, other_dependant);
+
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            CollectionAssert.AreEquivalent(relationship_resolver.ModList(), new List&lt;CkanModule&gt;
+            {
+                dependant,
+                depender
+            });
+            
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;2.0&quot;, &quot;1.0&quot;, &quot;0.5&quot;)]
+        [TestCase(&quot;2.0&quot;, &quot;1.0&quot;, &quot;1.5&quot;)]
+        [TestCase(&quot;2.0&quot;, &quot;2.0&quot;, &quot;0.5&quot;)]
+        public void Constructor_WithDependantVersionMin_ChooseCorrectly(string ver, string dep_min, string other)
+        {
+            var list = new List&lt;string&gt;();
+            var dependant = generator.GeneratorRandomModule(version: new Version(ver));
+            var other_dependant = generator.GeneratorRandomModule(identifier: dependant.identifier, version: new Version(other));
+
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = dependant.identifier, min_version = dep_min}
+            });
+            list.Add(depender.identifier);
+            list.Add(dependant.identifier);
+            list.Add(other_dependant.identifier);
+            AddToRegistry(depender, dependant, other_dependant);
+
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            CollectionAssert.AreEquivalent(relationship_resolver.ModList(), new List&lt;CkanModule&gt;
+            {
+                dependant,
+                depender
+            });
+
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;2.0&quot;, &quot;2.0&quot;, &quot;0.5&quot;)]
+        [TestCase(&quot;2.0&quot;, &quot;3.0&quot;, &quot;0.5&quot;)]
+        [TestCase(&quot;2.0&quot;, &quot;3.0&quot;, &quot;4.0&quot;)]
+        public void Constructor_WithDependantVersionMax_ChooseCorrectly(string ver, string dep_max, string other)
+        {
+            var list = new List&lt;string&gt;();
+            var dependant = generator.GeneratorRandomModule(version: new Version(ver));
+            var other_dependant = generator.GeneratorRandomModule(identifier: dependant.identifier, version: new Version(other));
+
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = dependant.identifier, max_version = dep_max}
+            });
+            list.Add(depender.identifier);
+            list.Add(dependant.identifier);
+            list.Add(other_dependant.identifier);
+            AddToRegistry(depender, dependant, other_dependant);
+
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            CollectionAssert.AreEquivalent(relationship_resolver.ModList(), new List&lt;CkanModule&gt;
+            {
+                dependant,
+                depender
+            });
+
+        }
+
+        [Test]
+        [Category(&quot;Version&quot;)]
+        [Explicit(&quot;Versions relationships not implemented&quot;)]
+        [TestCase(&quot;2.0&quot;, &quot;1.0&quot;, &quot;3.0&quot;, &quot;0.5&quot;)]
+        [TestCase(&quot;2.0&quot;, &quot;1.0&quot;, &quot;3.0&quot;, &quot;1.5&quot;)]
+        [TestCase(&quot;2.0&quot;, &quot;1.0&quot;, &quot;3.0&quot;, &quot;3.5&quot;)]
+        public void Constructor_WithDependantVersionMinMax_ChooseCorrectly(string ver, string dep_min, string dep_max, string other)
+        {
+            var list = new List&lt;string&gt;();
+            var dependant = generator.GeneratorRandomModule(version: new Version(ver));
+            var other_dependant = generator.GeneratorRandomModule(identifier: dependant.identifier, version: new Version(other));
+
+            var depender = generator.GeneratorRandomModule(depends: new List&lt;RelationshipDescriptor&gt;
+            {
+                new RelationshipDescriptor {name = dependant.identifier, min_version = dep_min, max_version = dep_max}
+            });
+            list.Add(depender.identifier);
+            list.Add(dependant.identifier);
+            list.Add(other_dependant.identifier);
+            AddToRegistry(depender, dependant, other_dependant);
+
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            CollectionAssert.AreEquivalent(relationship_resolver.ModList(), new List&lt;CkanModule&gt;
+            {
+                dependant,
+                depender
+            });
+
+        }
+
+        [Test]
+        public void Constructor_WithRegistryThatHasRequiredModuleRemoved_Throws()
+        {
+            var list = new List&lt;string&gt;();
+            var mod = generator.GeneratorRandomModule();
+            mod.ksp_version = new KSPVersion(&quot;0.10&quot;);
+            list.Add(mod.identifier);
+            registry.AddAvailable(mod);
+            registry.RemoveAvailable(mod);
+
+            Assert.Throws&lt;ModuleNotFoundKraken&gt;(() =&gt; new RelationshipResolver(
+                list,
+                options,
+                registry,
+                null));
+        }
+
+
+        [Test]
+        public void ReasonFor_WithModsNotInList_ThrowsArgumentException()
+        {
+            var list = new List&lt;string&gt;();
+            var mod = generator.GeneratorRandomModule();
+            list.Add(mod.identifier);
+            registry.AddAvailable(mod);
+            AddToRegistry(mod);
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+
+            var mod_not_in_resolver_list = generator.GeneratorRandomModule();
+            CollectionAssert.DoesNotContain(relationship_resolver.ModList(),mod_not_in_resolver_list);            
+            Assert.Throws&lt;ArgumentException&gt;(() =&gt; relationship_resolver.ReasonFor(mod_not_in_resolver_list));
+            
+        }
+
+        [Test]
+        public void ReasonFor_WithUserAddedMods_GivesReasonUserAdded()
+        {
+            var list = new List&lt;string&gt;();
+            var mod = generator.GeneratorRandomModule();                        
+            list.Add(mod.identifier);
+            registry.AddAvailable(mod);
+            AddToRegistry(mod);
+
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            var reason = relationship_resolver.ReasonFor(mod);
+            Assert.That(reason,Is.AssignableTo&lt;Relationship.UserRequested&gt;());
+        }
+
+        [Test]
+        public void ReasonFor_WithSugestedMods_GivesCorrectParent()
+        {
+            var list = new List&lt;string&gt;();
+            var sugested = generator.GeneratorRandomModule();
+            var mod = generator.GeneratorRandomModule(sugests: new List&lt;RelationshipDescriptor&gt; {new RelationshipDescriptor() { name = sugested.identifier } } );                        
+            list.Add(mod.identifier);            
+            AddToRegistry(mod,sugested);
+
+            options.with_all_suggests = true;
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            var reason = relationship_resolver.ReasonFor(sugested);
+            Assert.That(reason, Is.AssignableTo&lt;Relationship.Suggested&gt;());
+            Assert.That(reason.Parent,Is.EqualTo(mod));
+        }
+
+        [Test]
+        public void ReasonFor_WithTreeOfMods_GivesCorrectParents()
+        {
+            var list = new List&lt;string&gt;();            
+            var sugested = generator.GeneratorRandomModule();
+            var recommendedA = generator.GeneratorRandomModule();
+            var recommendedB = generator.GeneratorRandomModule();
+            var mod = generator.GeneratorRandomModule(sugests: new List&lt;RelationshipDescriptor&gt; { new RelationshipDescriptor { name = sugested.identifier}});
+            list.Add(mod.identifier);
+            sugested.recommends = new List&lt;RelationshipDescriptor&gt;
+            { new RelationshipDescriptor {name=recommendedA.identifier},
+              new RelationshipDescriptor { name = recommendedB.identifier}};
+
+            AddToRegistry(mod, sugested,recommendedA,recommendedB);
+
+
+            options.with_all_suggests = true;
+            options.with_recommends = true;
+            var relationship_resolver = new RelationshipResolver(list, options, registry, null);
+            var reason = relationship_resolver.ReasonFor(recommendedA);
+            Assert.That(reason, Is.AssignableTo&lt;Relationship.Recommended&gt;());
+            Assert.That(reason.Parent, Is.EqualTo(sugested));
+
+            reason = relationship_resolver.ReasonFor(recommendedB);
+            Assert.That(reason, Is.AssignableTo&lt;Relationship.Recommended&gt;());
+            Assert.That(reason.Parent, Is.EqualTo(sugested));
+        }
+
+
+
+
+
+
+
+        private void AddToRegistry(params CkanModule[] modules)
+        {
+            foreach (var module in modules)
+            {
+                registry.AddAvailable(module);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[71,9,71,10,0],[72,13,72,43,0],[73,13,73,59,0],[74,13,77,16,0],[79,13,79,40,0],[80,13,80,40,0],[81,13,81,41,0],[83,13,83,53,0],[87,22,87,24,0],[88,9,88,10,0],[96,9,96,10,0],[97,13,97,43,0],[98,13,98,84,0],[99,13,102,16,0],[104,13,104,40,0],[105,13,105,40,0],[106,13,106,41,0],[108,13,108,53,0],[112,22,112,24,0],[113,9,113,10,0],[121,9,121,10,0],[122,13,122,43,0],[123,13,123,84,0],[124,13,127,16,0],[129,13,129,40,0],[130,13,130,40,0],[131,13,131,41,0],[133,13,133,53,0],[137,22,137,24,0],[138,9,138,10,0],[147,9,147,10,0],[148,13,148,43,0],[149,13,149,84,0],[150,13,153,16,0],[155,13,155,40,0],[156,13,156,40,0],[157,13,157,41,0],[159,13,159,53,0],[163,22,163,24,0],[164,9,164,10,0],[172,9,172,10,0],[173,13,173,43,0],[174,13,174,84,0],[175,13,178,16,0],[180,13,180,40,0],[181,13,181,40,0],[182,13,182,41,0],[184,13,184,39,0],[188,22,188,24,0],[189,9,189,10,0],[196,9,196,10,0],[197,13,197,43,0],[198,13,198,84,0],[199,13,202,16,0],[204,13,204,40,0],[205,13,205,40,0],[206,13,206,41,0],[208,13,208,39,0],[212,22,212,24,0],[213,9,213,10,0],[220,9,220,10,0],[221,13,221,43,0],[222,13,222,84,0],[223,13,226,16,0],[228,13,228,40,0],[229,13,229,40,0],[230,13,230,41,0],[232,13,232,39,0],[236,22,236,24,0],[237,9,237,10,0],[245,9,245,10,0],[246,13,246,43,0],[247,13,247,84,0],[248,13,251,16,0],[253,13,253,40,0],[254,13,254,40,0],[255,13,255,41,0],[257,13,257,39,0],[261,22,261,24,0],[262,9,262,10,0],[316,9,316,10,0],[317,13,317,43,0],[318,13,318,59,0],[319,13,319,40,0],[320,13,320,34,0],[321,13,321,71,0],[323,13,323,97,0],[324,13,324,71,0],[325,9,325,10,0],[494,9,494,10,0],[495,13,495,43,0],[496,13,496,88,0],[497,13,500,16,0],[501,13,501,43,0],[502,13,502,44,0],[503,13,503,48,0],[505,13,505,55,0],[509,22,509,24,0],[511,9,511,10,0],[518,9,518,10,0],[519,13,519,43,0],[520,13,520,88,0],[521,13,524,16,0],[525,13,525,43,0],[526,13,526,44,0],[527,13,527,48,0],[529,13,529,55,0],[533,22,533,24,0],[535,9,535,10,0],[542,9,542,10,0],[543,13,543,43,0],[544,13,544,88,0],[545,13,548,16,0],[549,13,549,43,0],[550,13,550,44,0],[551,13,551,48,0],[553,13,553,55,0],[557,22,557,24,0],[559,9,559,10,0],[567,9,567,10,0],[568,13,568,43,0],[569,13,569,88,0],[570,13,573,16,0],[574,13,574,43,0],[575,13,575,44,0],[576,13,576,48,0],[578,13,578,55,0],[582,22,582,24,0],[584,9,584,10,0],[592,9,592,10,0],[593,13,593,43,0],[594,13,594,88,0],[595,13,595,130,0],[597,13,600,16,0],[602,13,602,43,0],[603,13,603,44,0],[604,13,604,50,0],[605,13,605,65,0],[607,13,607,97,0],[608,13,612,16,0],[614,9,614,10,0],[623,9,623,10,0],[624,13,624,43,0],[625,13,625,88,0],[626,13,626,130,0],[628,13,631,16,0],[632,13,632,43,0],[633,13,633,44,0],[634,13,634,50,0],[635,13,635,65,0],[637,13,637,97,0],[638,13,642,16,0],[644,9,644,10,0],[653,9,653,10,0],[654,13,654,43,0],[655,13,655,88,0],[656,13,656,130,0],[658,13,661,16,0],[662,13,662,43,0],[663,13,663,44,0],[664,13,664,50,0],[665,13,665,65,0],[667,13,667,97,0],[668,13,672,16,0],[674,9,674,10,0],[683,9,683,10,0],[684,13,684,43,0],[685,13,685,88,0],[686,13,686,130,0],[688,13,691,16,0],[692,13,692,43,0],[693,13,693,44,0],[694,13,694,50,0],[695,13,695,65,0],[697,13,697,97,0],[698,13,702,16,0],[704,9,704,10,0],[83,53,87,22,0],[108,53,112,22,0],[133,53,137,22,0],[159,53,163,22,0],[184,39,188,22,0],[208,39,212,22,0],[232,39,236,22,0],[257,39,261,22,0],[505,55,509,22,0],[529,55,533,22,0],[553,55,557,22,0],[578,55,582,22,0],[19,9,19,10,1],[20,13,20,41,1],[21,13,21,58,1],[22,13,22,69,1],[24,13,24,56,1],[25,9,25,10,1],[29,9,29,10,1],[30,13,30,41,1],[31,13,31,58,1],[32,13,32,39,1],[35,22,35,24,1],[36,9,36,10,1],[40,9,40,10,1],[41,13,41,43,1],[42,13,42,59,1],[43,13,46,16,1],[48,13,48,40,1],[49,13,49,40,1],[50,13,50,41,1],[52,13,52,53,1],[56,22,56,24,1],[59,13,59,57,1],[60,13,60,84,1],[62,13,62,56,1],[62,76,62,79,1],[63,13,63,56,1],[63,76,63,79,1],[64,13,64,70,1],[65,9,65,10,1],[266,9,266,10,1],[267,13,267,60,1],[269,13,269,43,1],[270,13,270,59,1],[271,13,274,16,1],[275,13,278,16,1],[279,13,282,16,1],[284,13,284,40,1],[285,13,285,48,1],[286,13,286,59,1],[290,22,290,24,1],[292,9,292,10,1],[296,9,296,10,1],[297,13,297,43,1],[298,13,298,59,1],[299,13,299,40,1],[301,13,301,55,1],[305,22,305,24,1],[307,9,307,10,1],[329,9,329,10,1],[330,13,330,46,1],[331,13,331,43,1],[332,13,332,62,1],[333,13,336,16,1],[338,13,338,43,1],[339,13,339,47,1],[340,13,340,77,1],[342,13,342,97,1],[343,13,343,82,1],[344,9,344,10,1],[348,9,348,10,1],[349,13,349,46,1],[350,13,350,43,1],[351,13,351,62,1],[352,13,355,16,1],[356,13,359,16,1],[361,13,361,43,1],[362,13,362,38,1],[363,13,363,52,1],[365,13,365,97,1],[366,13,366,88,1],[367,9,367,10,1],[371,9,371,10,1],[372,13,372,43,1],[373,13,373,63,1],[374,13,377,16,1],[378,13,381,16,1],[384,13,384,43,1],[385,13,385,59,1],[386,13,386,74,1],[388,13,388,53,1],[392,22,392,24,1],[393,9,393,10,1],[397,9,397,10,1],[398,13,398,46,1],[399,13,399,43,1],[400,13,400,62,1],[401,13,404,16,1],[406,13,406,43,1],[407,13,407,47,1],[409,13,409,97,1],[410,13,410,82,1],[411,9,411,10,1],[415,9,415,10,1],[416,13,416,46,1],[417,13,417,43,1],[418,13,418,63,1],[419,13,422,16,1],[423,13,426,16,1],[428,13,428,43,1],[429,13,429,58,1],[431,13,431,97,1],[432,13,432,83,1],[434,13,434,47,1],[436,13,436,93,1],[437,13,437,89,1],[438,9,438,10,1],[442,9,442,10,1],[443,13,443,43,1],[444,13,444,59,1],[445,13,448,16,1],[449,13,452,16,1],[453,13,453,43,1],[454,13,454,44,1],[455,13,455,97,1],[457,13,461,16,1],[463,9,463,10,1],[468,9,468,10,1],[469,13,469,43,1],[470,13,470,63,1],[471,13,474,16,1],[475,13,475,43,1],[476,13,476,45,1],[478,13,478,55,1],[482,22,482,24,1],[484,9,484,10,1],[708,9,708,10,1],[709,13,709,43,1],[710,13,710,57,1],[711,13,711,54,1],[712,13,712,38,1],[713,13,713,40,1],[714,13,714,43,1],[716,13,716,55,1],[720,22,720,24,1],[721,9,721,10,1],[726,9,726,10,1],[727,13,727,43,1],[728,13,728,57,1],[729,13,729,38,1],[730,13,730,40,1],[731,13,731,32,1],[732,13,732,97,1],[734,13,734,78,1],[735,13,735,103,1],[736,13,736,52,1],[736,109,736,111,1],[738,9,738,10,1],[742,9,742,10,1],[743,13,743,43,1],[744,13,744,57,1],[745,13,745,38,1],[746,13,746,40,1],[747,13,747,32,1],[749,13,749,97,1],[750,13,750,63,1],[751,13,751,79,1],[752,9,752,10,1],[756,9,756,10,1],[757,13,757,43,1],[758,13,758,62,1],[759,13,759,162,1],[760,13,760,38,1],[761,13,761,41,1],[763,13,763,46,1],[764,13,764,97,1],[765,13,765,68,1],[766,13,766,76,1],[767,13,767,56,1],[768,9,768,10,1],[772,9,772,10,1],[773,13,773,43,1],[774,13,774,62,1],[775,13,775,66,1],[776,13,776,66,1],[777,13,777,158,1],[778,13,778,38,1],[779,13,781,77,1],[783,13,783,68,1],[786,13,786,46,1],[787,13,787,44,1],[788,13,788,97,1],[789,13,789,72,1],[790,13,790,78,1],[791,13,791,62,1],[793,13,793,68,1],[794,13,794,78,1],[795,13,795,62,1],[796,9,796,10,1],[805,9,805,10,1],[806,13,806,20,1],[806,36,806,43,1],[806,22,806,32,1],[807,13,807,14,1],[808,17,808,47,1],[809,13,809,14,1],[806,33,806,35,1],[810,9,810,10,1],[32,39,35,22,1],[52,53,56,22,1],[62,56,62,76,1],[63,56,63,76,1],[286,59,290,22,1],[301,55,305,22,1],[388,53,392,22,1],[478,55,482,22,1],[716,55,720,22,1],[736,52,736,109,1]]);
+    </script>
+  </body>
+</html>

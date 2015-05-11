@@ -1,7 +1,0 @@
-
-
-NCrunch: This test reported an inconclusive result.  You can adjust whether NCrunch should treat this result as a pass by using the 'Consider inconclusive tests as passing' NCrunch project-level configuration setting.
-Dev build
-   at NUnit.Framework.Assert.Inconclusive(String message, Object[] args)
-   at NUnit.Framework.Assert.Inconclusive(String message)
-   at CKANTests.Module.FutureModule() in C:\Users\Richard\Documents\CKAN\CKAN\Tests\CKAN\Types\Module.cs:line 105

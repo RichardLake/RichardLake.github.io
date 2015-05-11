@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\types\releasestatus.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using Newtonsoft.Json;
+
+namespace CKAN
+{
+    /// &lt;summary&gt;
+    /// A release status, complying to the CKAN spec.
+    /// &lt;/summary&gt;
+    [JsonConverter(typeof(JsonSimpleStringConverter))]
+    public class ReleaseStatus
+    {
+        private static readonly HashSet&lt;string&gt; valid_statuses = new HashSet&lt;string&gt; {
+            &quot;stable&quot;, &quot;testing&quot;, &quot;development&quot; // Spec 1.0 statuses
+        };
+
+        private string status;
+
+        /// &lt;summary&gt;
+        /// Creates a ReleaseStatus object which compiles to the CKAN spec.
+        /// Throws a BadMetadataKraken if passed a non-compliant string.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;status&quot;&gt;Status.&lt;/param&gt;
+        public ReleaseStatus(string status)
+        {
+            switch (status)
+            {
+                // As per the spec, if the status is null, we assume stable.
+                case null:
+                    status = &quot;stable&quot;;
+                    break;
+
+                // For compatibility with older metadata, we map &#39;alpha&#39; and &#39;beta&#39;
+                // to &#39;development&#39; and &#39;testing&#39;.
+
+                case &quot;alpha&quot;:
+                    status = &quot;development&quot;;
+                    break;
+
+                case &quot;beta&quot;:
+                    status = &quot;testing&quot;;
+                    break;
+            }
+
+            if (!valid_statuses.Contains(status))
+            {
+                throw new BadMetadataKraken(
+                    null,
+                    String.Format(&quot;{0} is not a valid release status&quot;, status)
+                );
+            }
+
+            this.status = status;
+        }
+
+        public override string ToString()
+        {
+            return status;
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[41,21,41,40,0],[42,21,42,27,0],[24,9,24,44,1],[25,9,25,10,1],[26,13,26,28,1],[30,21,30,39,1],[31,21,31,27,1],[37,21,37,44,1],[38,21,38,27,1],[45,13,45,50,1],[46,13,46,14,1],[47,17,50,19,1],[53,13,53,34,1],[54,9,54,10,1],[57,9,57,10,1],[58,13,58,27,1],[59,9,59,10,1],[13,9,15,11,1]]);
+    </script>
+  </body>
+</html>

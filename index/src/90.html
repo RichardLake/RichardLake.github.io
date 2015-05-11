@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\tests\ckan\moduleinstaller.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Transactions;
+using CKAN;
+using ICSharpCode.SharpZipLib.Zip;
+using NUnit.Framework;
+
+namespace CKANTests
+{
+    [TestFixture]
+    public class ModuleInstaller
+    {
+        private string flag_path;
+        private string dogezip;
+        private CkanModule dogemod;
+
+        private string mm_zip;
+        private CkanModule mm_mod;
+
+        [SetUp]
+        public void Setup()
+        {
+            // By setting these for every test, we can make sure our tests can change
+            // them any way they like without harming other tests.
+
+            flag_path = &quot;DogeCoinFlag-1.01/GameData/DogeCoinFlag/Flags/dogecoin.png&quot;;
+            dogezip = Tests.TestData.DogeCoinFlagZip();
+            dogemod = Tests.TestData.DogeCoinFlag_101_module();
+
+            mm_zip = Tests.TestData.ModuleManagerZip();
+            mm_mod = Tests.TestData.ModuleManagerModule();
+        }
+
+        [Test]
+        public void Sanity()
+        {
+            // Test our assumptions are right with the data we&#39;re using.
+
+            // Our _find mod should have a find section, but not a file section.
+            CkanModule mod = Tests.TestData.DogeCoinFlag_101_module_find();
+            Assert.IsNull(mod.install[0].file);
+            Assert.IsNotNull(mod.install[0].find);
+        }
+
+        [Test]
+        public void GenerateDefaultInstall()
+        {
+            string filename = Tests.TestData.DogeCoinFlagZip();
+            using (var zipfile = new ZipFile(filename))
+            {
+                CKAN.ModuleInstallDescriptor stanza = CKAN.ModuleInstallDescriptor.DefaultInstallStanza(&quot;DogeCoinFlag&quot;, zipfile);
+
+                TestDogeCoinStanza(stanza);
+
+                // Same again, but screwing up the case (we see this *all the time*)
+                CKAN.ModuleInstallDescriptor stanza2 = CKAN.ModuleInstallDescriptor.DefaultInstallStanza(&quot;DogecoinFlag&quot;, zipfile);
+
+                TestDogeCoinStanza(stanza2);
+
+                // Now what happens if we can&#39;t find what to install?
+
+                Assert.Throws&lt;FileNotFoundKraken&gt;(delegate
+                {
+                    CKAN.ModuleInstallDescriptor.DefaultInstallStanza(&quot;Xyzzy&quot;, zipfile);
+                });
+
+                // Make sure the FNFKraken looks like what we expect.
+                try
+                {
+                    CKAN.ModuleInstallDescriptor.DefaultInstallStanza(&quot;Xyzzy&quot;, zipfile);
+                }
+                catch (FileNotFoundKraken kraken)
+                {
+                    Assert.AreEqual(&quot;Xyzzy&quot;, kraken.file);
+                }
+            }
+        }
+
+        // Test data: different ways to install the same file.
+        public static CkanModule[] doge_mods =
+        {
+            Tests.TestData.DogeCoinFlag_101_module(),
+            Tests.TestData.DogeCoinFlag_101_module_find()
+        };
+
+        [Test][TestCaseSource(&quot;doge_mods&quot;)]
+        public void FindInstallableFiles(CkanModule mod)
+        {
+            List&lt;InstallableFile&gt; contents = CKAN.ModuleInstaller.FindInstallableFiles(mod, dogezip, null);
+            List&lt;string&gt; filenames = new List&lt;string&gt;();
+
+            Assert.IsNotNull(contents);
+
+            // Make sure it&#39;s actually got files!
+            Assert.IsTrue(contents.Count &gt; 0);
+
+            foreach (var file in contents)
+            {
+                // Make sure the destination paths are null, because we supplied no KSP instance.
+                Assert.IsNull(file.destination);
+
+                // Make sure the source paths are not null, that would be silly!
+                Assert.IsNotNull(file.source);
+
+                // And make sure our makeDir info is filled in.
+                Assert.IsNotNull(file.makedir);
+
+                filenames.Add(file.source.Name);
+            }
+
+            // Ensure we&#39;ve got an expected file
+            Assert.Contains(&quot;DogeCoinFlag-1.01/GameData/DogeCoinFlag/Flags/dogecoin.png&quot;, filenames);
+        }
+
+        [Test][TestCaseSource(&quot;doge_mods&quot;)]
+        public void FindInstallableFilesWithKSP(CkanModule mod)
+        {
+            using (var tidy = new Tests.DisposableKSP())
+            {
+                List&lt;InstallableFile&gt; contents = CKAN.ModuleInstaller.FindInstallableFiles(mod, dogezip, tidy.KSP);
+
+                // See if we can find an expected estination path in the right place.
+                string file = contents
+                    .Select(x =&gt; x.destination).FirstOrDefault(
+                    x =&gt; Regex.IsMatch(x, &quot;GameData/DogeCoinFlag/Flags/dogecoin\\.png$&quot;));
+
+                Assert.IsNotNull(file);
+            }
+        }
+
+        // GH #315, all of these should result in the same output.
+        // Even though they&#39;re not necessarily all spec-valid, we should accept them
+        // nonetheless.
+        public static readonly string[] SuchPaths =
+        {
+            &quot;GameData/SuchTest&quot;,
+            &quot;GameData/SuchTest/&quot;,
+            &quot;GameData\\SuchTest&quot;,
+            &quot;GameData\\SuchTest\\&quot;,
+            &quot;GameData\\SuchTest/&quot;,
+            &quot;GameData/SuchTest\\&quot;
+        };
+
+        [Test]
+        [TestCaseSource(&quot;SuchPaths&quot;)]
+        public void FindInstallbleFilesWithBonusPath(string path)
+        {
+            dogemod.install[0].install_to = path;
+            using (var tidy = new Tests.DisposableKSP())
+            {
+                IEnumerable&lt;InstallableFile&gt; contents = CKAN.ModuleInstaller.FindInstallableFiles(
+                                                            dogemod, dogezip, tidy.KSP
+                                                        );
+
+                string file = contents
+                    .Select(x =&gt; x.destination).FirstOrDefault(
+                    x =&gt; Regex.IsMatch(x, &quot;GameData/SuchTest/DogeCoinFlag/Flags/dogecoin\\.png$&quot;));
+
+                Assert.IsNotNull(file);
+            }
+        }
+
+        [Test]
+        public void ModuleManagerInstall()
+        {
+            using (var tidy = new Tests.DisposableKSP())
+            {
+                List&lt;InstallableFile&gt; contents = CKAN.ModuleInstaller.FindInstallableFiles(mm_mod, mm_zip, tidy.KSP);
+
+                string file = contents
+                    .Select(x =&gt; x.destination).FirstOrDefault(
+                    x =&gt; Regex.IsMatch(x, @&quot;ModuleManager\.2\.5\.1\.dll$&quot;));
+
+                Assert.IsNotNull(file, &quot;ModuleManager install&quot;);
+            }
+        }
+
+        [Test][TestCaseSource(&quot;doge_mods&quot;)]
+        // Make sure all our filters work.
+        public void FindInstallableFilesWithFilter(CkanModule mod)
+        {
+            string extra_doge = Tests.TestData.DogeCoinFlagZipWithExtras();
+
+            List&lt;InstallableFile&gt; contents = CKAN.ModuleInstaller.FindInstallableFiles(mod, extra_doge, null);
+
+            var files = contents.Select(x =&gt; x.source.Name);
+
+            Assert.IsTrue(files.Contains(&quot;DogeCoinFlag-1.01/GameData/DogeCoinFlag/Flags/dogecoin.png&quot;), &quot;dogecoin.png&quot;);
+            Assert.IsFalse(files.Contains(&quot;DogeCoinFlag-1.01/GameData/DogeCoinFlag/README.md&quot;), &quot;Filtered README 1&quot;);
+            Assert.IsFalse(files.Contains(&quot;DogeCoinFlag-1.01/GameData/DogeCoinFlag/Flags/README.md&quot;), &quot;Filtered README 2&quot;);
+            Assert.IsFalse(files.Contains(&quot;DogeCoinFlag-1.01/GameData/DogeCoinFlag/notes.txt.bak&quot;), &quot;Filtered .bak file&quot;);
+        }
+
+        [Test]
+        public void No_Installable_Files()
+        {
+            // This tests GH #93
+
+            string dogezip = Tests.TestData.DogeCoinFlagZip();
+            CkanModule bugged_mod = Tests.TestData.DogeCoinFlag_101_bugged_module();
+
+            Assert.Throws&lt;BadMetadataKraken&gt;(delegate
+            {
+                CKAN.ModuleInstaller.FindInstallableFiles(bugged_mod, dogezip, null);
+            });
+
+            try
+            {
+                CKAN.ModuleInstaller.FindInstallableFiles(bugged_mod, dogezip, null);
+            }
+            catch (BadMetadataKraken ex)
+            {
+                // Make sure our module information is attached.
+                Assert.IsNotNull(ex.module);
+                Assert.AreEqual(bugged_mod.identifier, ex.module.identifier);
+            }
+        }
+
+#pragma warning disable 0414
+
+        // All of these targets should fail.
+        public static readonly string[] BadTargets = {
+            &quot;GameDataIsTheBestData&quot;, &quot;Shups&quot;, &quot;GameData/../../../../etc/pwned&quot;,
+            &quot;Ships/Foo&quot;, &quot;GameRoot/saves&quot;, &quot;GameRoot/CKAN&quot;, &quot;GameData/..&quot;,
+            @&quot;GameData\..\..\etc\pwned&quot;, @&quot;GameData\..&quot;
+        };
+
+#pragma warning restore 0414
+
+        [Test]
+        [TestCaseSource(&quot;BadTargets&quot;)]
+        public void FindInstallableFilesWithBadTarget(string location)
+        {
+            // This install location? It shouldn&#39;t be valid.
+            dogemod.install[0].install_to = location;
+
+            Assert.Throws&lt;BadInstallLocationKraken&gt;(delegate
+            {
+                CKAN.ModuleInstaller.FindInstallableFiles(dogemod, dogezip, null);
+            });
+        }
+
+        [Test]
+        // GH #205, make sure we write in *binary*, not text.
+        public void BinaryNotText_205()
+        {
+            // Use CopyZipEntry (via CopyDogeFromZip) and make sure it
+            // comes out the right size.
+            string tmpfile = CopyDogeFromZip();
+            long size = new FileInfo(tmpfile).Length;
+
+            try
+            {
+                // Compare recorded length against what we expect.
+                Assert.AreEqual(52043, size);
+            }
+            finally
+            {
+                // Tidy up.
+                File.Delete(tmpfile);
+            }
+        }
+
+        [Test]
+        // Make sure when we roll-back a transaction, files written with CopyZipEntry go
+        // back to their pre-transaction state.
+        public void FileSysRollBack()
+        {
+            string file;
+
+            using (var scope = new TransactionScope())
+            {
+                file = CopyDogeFromZip();
+                Assert.IsTrue(new FileInfo(file).Length &gt; 0);
+                scope.Dispose(); // Rollback
+            }
+
+            // And now, our file should be gone!
+            Assert.IsFalse(File.Exists(file));
+        }
+
+        [Test]
+        // We don&#39;t allow overwriting of files when doing installs. Hooray!
+        public void DontOverWrite_208()
+        {
+            using (ZipFile zipfile = new ZipFile(Tests.TestData.DogeCoinFlagZip()))
+            {
+                ZipEntry entry = zipfile.GetEntry(flag_path);
+                string tmpfile = Path.GetTempFileName();
+
+                Assert.Throws&lt;FileExistsKraken&gt;(delegate
+                {
+                    CKAN.ModuleInstaller.CopyZipEntry(zipfile, entry, tmpfile, false);
+                });
+
+                // Cleanup
+                File.Delete(tmpfile);
+            }
+        }
+
+        [Test]
+        [Category(&quot;TODO&quot;)]
+        [Explicit]
+        //Test how we handle corrupt data
+        public void CorruptZip_242()
+        {
+            string corrupt_dogezip = Tests.TestData.DogeCoinFlagZipCorrupt();
+
+            using (var zipfile = new ZipFile(corrupt_dogezip))
+            {
+                // GenerateDefault Install
+                CKAN.ModuleInstallDescriptor.DefaultInstallStanza(&quot;DogeCoinFlag&quot;, zipfile);
+
+                // FindInstallableFiles
+                CkanModule dogemod = Tests.TestData.DogeCoinFlag_101_module();
+                CKAN.ModuleInstaller.FindInstallableFiles(dogemod, corrupt_dogezip, null);
+            }
+        }
+
+        [Test]
+        public void TransformOutputName()
+        {
+            Assert.AreEqual(&quot;GameData/kOS/Plugins/kOS.dll&quot;, CKAN.ModuleInstaller.TransformOutputName(&quot;GameData/kOS&quot;, &quot;GameData/kOS/Plugins/kOS.dll&quot;, &quot;GameData&quot;));
+            Assert.AreEqual(&quot;GameData/kOS/Plugins/kOS.dll&quot;, CKAN.ModuleInstaller.TransformOutputName(&quot;kOS-1.1/GameData/kOS&quot;, &quot;kOS-1.1/GameData/kOS/Plugins/kOS.dll&quot;, &quot;GameData&quot;));
+            Assert.AreEqual(&quot;GameData/ModuleManager.2.5.1.dll&quot;, CKAN.ModuleInstaller.TransformOutputName(&quot;ModuleManager.2.5.1.dll&quot;, &quot;ModuleManager.2.5.1.dll&quot;, &quot;GameData&quot;));
+            Assert.AreEqual(&quot;SomeDir/Ships/SPH/FAR Firehound.craft&quot;, CKAN.ModuleInstaller.TransformOutputName(&quot;Ships&quot;, &quot;Ships/SPH/FAR Firehound.craft&quot;, &quot;SomeDir/Ships&quot;));
+        }
+
+        private string CopyDogeFromZip()
+        {
+            string dogezip = Tests.TestData.DogeCoinFlagZip();
+            ZipFile zipfile = new ZipFile(dogezip);
+
+            ZipEntry entry = zipfile.GetEntry(flag_path);
+            string tmpfile = Path.GetTempFileName();
+
+            // We have to delete our temporary file, as CZE refuses to overwrite; huzzah!
+            File.Delete(tmpfile);
+            CKAN.ModuleInstaller.CopyZipEntry(zipfile, entry, tmpfile, false);
+
+            return tmpfile;
+        }
+
+        [Test]
+        public void UninstallModNotFound()
+        {
+            using (var tidy = new Tests.DisposableKSP())
+            {
+                CKAN.KSPManager manager = new CKAN.KSPManager(new NullUser(), new FakeWin32Registry(tidy.KSP)){CurrentInstance = tidy.KSP};
+
+                Assert.Throws&lt;ModNotInstalledKraken&gt;(delegate
+                {
+                    // This should throw, as our tidy KSP has no mods installed.
+                    CKAN.ModuleInstaller.GetInstance(manager.CurrentInstance, NullUser.User).UninstallList(&quot;Foo&quot;);
+                });
+
+                manager.CurrentInstance = null; // I weep even more.
+            }
+        }
+
+        [Test]
+        public void CanInstallMod()
+        {
+            string mod_file_name = &quot;DogeCoinFlag/Flags/dogecoin.png&quot;;
+
+            // Create a new disposable KSP instance to run the test on.
+            using (Tests.DisposableKSP ksp = new Tests.DisposableKSP())
+            {
+                // Make sure the mod is not installed.
+                string mod_file_path = Path.Combine(ksp.KSP.GameData(), mod_file_name);
+
+                Assert.IsFalse(File.Exists(mod_file_path));
+
+                // Copy the zip file to the cache directory.
+                Assert.IsFalse(ksp.KSP.Cache.IsCachedZip(Tests.TestData.DogeCoinFlag_101_module().download));
+
+                string cache_path = ksp.KSP.Cache.Store(Tests.TestData.DogeCoinFlag_101_module().download, Tests.TestData.DogeCoinFlagZip());
+
+                Assert.IsTrue(ksp.KSP.Cache.IsCachedZip(Tests.TestData.DogeCoinFlag_101_module().download));
+                Assert.IsTrue(File.Exists(cache_path));
+
+                // Mark it as available in the registry.
+                Assert.AreEqual(0, ksp.KSP.Registry.Available(ksp.KSP.Version()).Count());
+
+                ksp.KSP.Registry.AddAvailable(Tests.TestData.DogeCoinFlag_101_module());
+
+                Assert.AreEqual(1, ksp.KSP.Registry.Available(ksp.KSP.Version()).Count());
+
+                // Attempt to install it.
+                List&lt;string&gt; modules = new List&lt;string&gt;();
+                modules.Add(Tests.TestData.DogeCoinFlag_101_module().identifier);
+
+                CKAN.ModuleInstaller.GetInstance(ksp.KSP, NullUser.User).InstallList(modules, new RelationshipResolverOptions());
+
+                // Check that the module is installed.
+                Assert.IsTrue(File.Exists(mod_file_path));
+            }
+        }
+
+        [Test]
+        public void CanUninstallMod()
+        {
+            string mod_file_name = &quot;DogeCoinFlag/Flags/dogecoin.png&quot;;
+
+            // Create a new disposable KSP instance to run the test on.
+            using (var ksp = new Tests.DisposableKSP())
+            {
+                CKAN.KSPManager manager = new CKAN.KSPManager(new NullUser(), new FakeWin32Registry(ksp.KSP)){CurrentInstance = ksp.KSP};
+
+                System.Diagnostics.Debug.WriteLine(ksp.KSP.DownloadCacheDir());
+                System.Console.WriteLine(ksp.KSP.DownloadCacheDir());
+
+                Assert.IsTrue(Directory.Exists(ksp.KSP.DownloadCacheDir()));
+
+                string mod_file_path = Path.Combine(ksp.KSP.GameData(), mod_file_name);
+
+                // Install the test mod.
+                ksp.KSP.Cache.Store(Tests.TestData.DogeCoinFlag_101_module().download, Tests.TestData.DogeCoinFlagZip());
+                ksp.KSP.Registry.AddAvailable(Tests.TestData.DogeCoinFlag_101_module());
+
+                List&lt;string&gt; modules = new List&lt;string&gt;();
+                modules.Add(Tests.TestData.DogeCoinFlag_101_module().identifier);
+
+                CKAN.ModuleInstaller.GetInstance(manager.CurrentInstance, NullUser.User).InstallList(modules, new RelationshipResolverOptions());
+
+                // Check that the module is installed.
+                Assert.IsTrue(File.Exists(mod_file_path));
+
+                // Attempt to uninstall it.
+                CKAN.ModuleInstaller.GetInstance(manager.CurrentInstance, NullUser.User).UninstallList(modules);
+
+                // Check that the module is not installed.
+                Assert.IsFalse(File.Exists(mod_file_path));
+            }
+        }
+
+        [Test]
+        public void ModuleManagerInstancesAreDecoupled()
+        {
+            string mod_file_name = &quot;DogeCoinFlag/Flags/dogecoin.png&quot;;
+
+            // Create a new disposable KSP instance to run the test on.
+            Assert.DoesNotThrow(delegate
+            {
+                for (int i = 0; i &lt; 5; i++)
+                {
+                    using (Tests.DisposableKSP ksp = new Tests.DisposableKSP())
+                    {
+                        // Copy the zip file to the cache directory.
+                        ksp.KSP.Cache.Store(Tests.TestData.DogeCoinFlag_101_module().download, Tests.TestData.DogeCoinFlagZip());
+
+                        // Mark it as available in the registry.
+                        ksp.KSP.Registry.AddAvailable(Tests.TestData.DogeCoinFlag_101_module());
+
+                        // Attempt to install it.
+                        List&lt;string&gt; modules = new List&lt;string&gt;();
+                        modules.Add(Tests.TestData.DogeCoinFlag_101_module().identifier);
+
+                        CKAN.ModuleInstaller.GetInstance(ksp.KSP, NullUser.User).InstallList(modules, new RelationshipResolverOptions());
+
+                        // Check that the module is installed.
+                        string mod_file_path = Path.Combine(ksp.KSP.GameData(), mod_file_name);
+
+                        Assert.IsTrue(File.Exists(mod_file_path));
+                    }
+                }
+            }
+            );
+        }
+
+        private void TestDogeCoinStanza(CKAN.ModuleInstallDescriptor stanza)
+        {
+            Assert.AreEqual(&quot;GameData&quot;, stanza.install_to);
+            Assert.AreEqual(&quot;DogeCoinFlag-1.01/GameData/DogeCoinFlag&quot;, stanza.file);
+        }
+
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[73,17,73,18,0],[212,13,212,14,0],[308,9,308,10,0],[309,13,309,78,0],[311,20,311,62,0],[312,13,312,14,0],[314,17,314,92,0],[317,17,317,79,0],[318,17,318,91,0],[319,13,319,14,0],[320,9,320,10,0],[242,13,242,14,0],[67,17,67,18,0],[207,13,207,14,0],[296,17,296,18,0],[357,17,357,18,0],[24,9,24,10,1],[28,13,28,86,1],[29,13,29,56,1],[30,13,30,64,1],[32,13,32,56,1],[33,13,33,59,1],[34,9,34,10,1],[38,9,38,10,1],[42,13,42,76,1],[43,13,43,48,1],[44,13,44,51,1],[45,9,45,10,1],[49,9,49,10,1],[50,13,50,64,1],[51,20,51,55,1],[52,13,52,14,1],[53,17,53,130,1],[55,17,55,44,1],[58,17,58,131,1],[60,17,60,45,1],[64,17,65,17,1],[65,18,66,21,1],[66,89,67,17,1],[67,18,67,20,1],[71,17,71,18,1],[72,21,72,89,1],[74,17,74,50,1],[75,17,75,18,1],[76,21,76,59,1],[77,17,77,18,1],[78,13,78,14,1],[79,9,79,10,1],[90,9,90,10,1],[91,13,91,108,1],[92,13,92,57,1],[94,13,94,40,1],[97,13,97,47,1],[99,13,99,20,1],[99,34,99,42,1],[99,22,99,30,1],[100,13,100,14,1],[102,17,102,49,1],[105,17,105,47,1],[108,17,108,48,1],[110,17,110,49,1],[111,13,111,14,1],[99,31,99,33,1],[114,13,114,102,1],[115,9,115,10,1],[119,9,119,10,1],[120,20,120,56,1],[121,13,121,14,1],[122,17,122,116,1],[125,17,126,34,1],[126,47,127,26,1],[127,89,127,91,1],[129,17,129,40,1],[130,13,130,14,1],[131,9,131,10,1],[149,9,149,10,1],[150,13,150,50,1],[151,20,151,56,1],[152,13,152,14,1],[153,17,155,59,1],[157,17,158,34,1],[158,47,159,26,1],[159,98,159,100,1],[161,17,161,40,1],[162,13,162,14,1],[163,9,163,10,1],[167,9,167,10,1],[168,20,168,56,1],[169,13,169,14,1],[170,17,170,118,1],[172,17,173,34,1],[173,47,174,26,1],[174,75,174,77,1],[176,17,176,65,1],[177,13,177,14,1],[178,9,178,10,1],[183,9,183,10,1],[184,13,184,76,1],[186,13,186,111,1],[188,13,188,46,1],[188,59,188,61,1],[190,13,190,121,1],[191,13,191,118,1],[192,13,192,124,1],[193,13,193,123,1],[194,9,194,10,1],[198,9,198,10,1],[201,13,201,63,1],[202,13,202,85,1],[204,13,205,13,1],[205,14,206,17,1],[206,86,207,13,1],[207,14,207,16,1],[210,13,210,14,1],[211,17,211,86,1],[213,13,213,41,1],[214,13,214,14,1],[216,17,216,45,1],[217,17,217,78,1],[218,13,218,14,1],[219,9,219,10,1],[235,9,235,10,1],[237,13,237,54,1],[239,13,240,13,1],[240,14,241,17,1],[241,83,242,13,1],[242,14,242,16,1],[243,9,243,10,1],[248,9,248,10,1],[251,13,251,48,1],[252,13,252,54,1],[255,13,255,14,1],[257,17,257,46,1],[258,13,258,14,1],[260,13,260,14,1],[262,17,262,38,1],[263,13,263,14,1],[264,9,264,10,1],[270,9,270,10,1],[273,20,273,54,1],[274,13,274,14,1],[275,17,275,42,1],[276,17,276,62,1],[277,17,277,33,1],[278,13,278,14,1],[281,13,281,47,1],[282,9,282,10,1],[287,9,287,10,1],[288,20,288,83,1],[289,13,289,14,1],[290,17,290,62,1],[291,17,291,57,1],[293,17,294,17,1],[294,18,295,21,1],[295,87,296,17,1],[296,18,296,20,1],[299,17,299,38,1],[300,13,300,14,1],[301,9,301,10,1],[324,9,324,10,1],[325,13,325,163,1],[326,13,326,179,1],[327,13,327,173,1],[328,13,328,171,1],[329,9,329,10,1],[332,9,332,10,1],[333,13,333,63,1],[334,13,334,52,1],[336,13,336,58,1],[337,13,337,53,1],[340,13,340,34,1],[341,13,341,79,1],[343,13,343,28,1],[344,9,344,10,1],[348,9,348,10,1],[349,20,349,56,1],[350,13,350,14,1],[351,17,351,140,1],[353,17,354,17,1],[354,18,356,21,1],[356,115,357,17,1],[357,18,357,20,1],[359,17,359,48,1],[360,13,360,14,1],[361,9,361,10,1],[365,9,365,10,1],[366,13,366,70,1],[369,20,369,71,1],[370,13,370,14,1],[372,17,372,88,1],[374,17,374,60,1],[377,17,377,110,1],[379,17,379,142,1],[381,17,381,109,1],[382,17,382,56,1],[385,17,385,91,1],[387,17,387,89,1],[389,17,389,91,1],[392,17,392,59,1],[393,17,393,82,1],[395,17,395,130,1],[398,17,398,59,1],[399,13,399,14,1],[400,9,400,10,1],[404,9,404,10,1],[405,13,405,70,1],[408,20,408,55,1],[409,13,409,14,1],[410,17,410,138,1],[413,17,413,70,1],[415,17,415,77,1],[417,17,417,88,1],[420,17,420,122,1],[421,17,421,89,1],[423,17,423,59,1],[424,17,424,82,1],[426,17,426,146,1],[429,17,429,59,1],[432,17,432,113,1],[435,17,435,60,1],[436,13,436,14,1],[437,9,437,10,1],[441,9,441,10,1],[442,13,442,70,1],[445,13,446,13,1],[446,14,447,22,1],[447,31,447,33,1],[447,38,447,40,1],[447,43,448,17,1],[448,18,449,28,1],[449,79,450,21,1],[450,22,452,25,1],[452,130,455,25,1],[455,97,458,25,1],[458,67,459,25,1],[459,90,461,25,1],[461,138,464,25,1],[464,96,466,25,1],[466,67,467,21,1],[467,22,468,17,1],[468,18,469,13,1],[469,14,470,15,1],[471,9,471,10,1],[474,9,474,10,1],[475,13,475,60,1],[476,13,476,85,1],[477,9,477,10,1],[82,9,86,11,1],[136,9,144,11,1],[224,9,228,11,1],[240,13,240,14,1],[241,17,241,83,1],[65,17,65,18,1],[66,21,66,89,1],[126,34,126,47,1],[127,26,127,89,1],[158,34,158,47,1],[159,26,159,98,1],[173,34,173,47,1],[174,26,174,75,1],[188,46,188,59,1],[205,13,205,14,1],[206,17,206,86,1],[294,17,294,18,1],[295,21,295,87,1],[354,17,354,18,1],[356,21,356,115,1],[446,13,446,14,1],[447,22,447,31,1],[448,17,448,18,1],[449,28,449,79,1],[450,21,450,22,1],[452,25,452,130,1],[455,25,455,97,1],[458,25,458,67,1],[459,25,459,90,1],[461,25,461,138,1],[464,25,464,96,1],[466,25,466,67,1],[467,21,467,22,1],[468,17,468,18,1],[447,40,447,43,1],[447,33,447,38,1],[469,13,469,14,1]]);
+    </script>
+  </body>
+</html>

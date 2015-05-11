@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-cmdline\action\list.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
+using log4net;
+
+namespace CKAN.CmdLine
+{
+    public class List : ICommand
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof(List));
+
+        public IUser user { get; set; }
+
+        public List(IUser user)
+        {
+            this.user = user;
+        }
+
+        public int RunCommand(CKAN.KSP ksp, object raw_options)
+        {
+            ListOptions options = (ListOptions) raw_options;
+
+            Registry registry = RegistryManager.Instance(ksp).registry;
+
+            if (!(options.porcelain))
+            {
+                user.RaiseMessage(&quot;\nKSP found at {0}\n&quot;, ksp.GameDir());
+                user.RaiseMessage(&quot;KSP Version: {0}\n&quot;, ksp.Version());
+
+                user.RaiseMessage(&quot;Installed Modules:\n&quot;);
+            }
+
+            var installed = new SortedDictionary&lt;string, Version&gt;(registry.Installed());
+
+            foreach (KeyValuePair&lt;string, Version&gt; mod in installed)
+            {
+                Version current_version = mod.Value;
+
+                string bullet = &quot;*&quot;;
+
+                if (current_version is ProvidesVersion)
+                {
+                    // Skip virtuals for now.
+                    continue;
+                }
+                else if (current_version is DllVersion)
+                {
+                    // Autodetected dll
+                    bullet = &quot;-&quot;;
+                }
+                else
+                {
+                    try
+                    {
+                        // Check if upgrades are available, and show appropriately.
+                        CkanModule latest = registry.LatestAvailable(mod.Key, ksp.Version());
+
+                        log.InfoFormat(&quot;Latest {0} is {1}&quot;, mod.Key, latest);
+
+                        if (latest == null)
+                        {
+                            // Not compatible!
+                            bullet = &quot;X&quot;;
+                        }
+                        else if (latest.version.IsEqualTo(current_version))
+                        {
+                            // Up to date
+                            bullet = &quot;-&quot;;
+                        }
+                        else if (latest.version.IsGreaterThan(mod.Value))
+                        {
+                            // Upgradable
+                            bullet = &quot;^&quot;;
+                        }
+                    }
+                    catch (ModuleNotFoundKraken)
+                    {
+                        log.InfoFormat(&quot;{0} is installed, but no longer in the registry&quot;, mod.Key);
+                        bullet = &quot;?&quot;;
+                    }
+                }
+
+                user.RaiseMessage(&quot;{0} {1} {2}&quot;, bullet, mod.Key, mod.Value);
+            }
+
+            if (!(options.porcelain))
+            {
+                user.RaiseMessage(&quot;\nLegend: -: Up to date. X: Incompatible. ^: Upgradable. ?: Unknown &quot;);
+            }
+
+            return Exit.OK;
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[13,29,13,33,0],[13,34,13,38,0],[15,9,15,32,0],[17,13,17,30,0],[18,9,18,10,0],[22,13,22,61,0],[24,13,24,72,0],[26,13,26,38,0],[28,17,28,74,0],[29,17,29,72,0],[31,17,31,59,0],[34,13,34,89,0],[36,59,36,68,0],[36,22,36,55,0],[38,17,38,53,0],[40,17,40,37,0],[42,17,42,56,0],[47,22,47,56,0],[50,21,50,34,0],[51,17,51,18,0],[57,25,57,94,0],[59,25,59,78,0],[61,25,61,44,0],[64,29,64,42,0],[65,25,65,26,0],[66,30,66,76,0],[69,29,69,42,0],[70,25,70,26,0],[71,30,71,74,0],[74,29,74,42,0],[76,21,76,22,0],[77,21,77,49,0],[79,25,79,100,0],[80,25,80,38,0],[81,21,81,22,0],[84,17,84,78,0],[36,56,36,58,0],[87,13,87,38,0],[89,17,89,107,0],[92,13,92,28,0],[11,9,11,79,0]]);
+    </script>
+  </body>
+</html>

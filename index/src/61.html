@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\mainmodlist.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace CKAN
+{
+    public partial class Main
+    {
+        private void UpdateFilters(Main control)
+        {
+            Util.Invoke(control, _UpdateFilters);
+        }
+
+        private void _UpdateFilters()
+        {
+            if (ModList == null) return;
+
+            // Each time a row in DataGridViewRow is changed, DataGridViewRow updates the view. Which is slow.
+            // To make the filtering process faster, Copy the list of rows. Filter out the hidden and replace t
+            // rows in DataGridView.
+            var rows = new DataGridViewRow[mainModList.FullListOfModRows.Count];
+            mainModList.FullListOfModRows.CopyTo(rows, 0);
+            ModList.Rows.Clear();
+
+            foreach (var row in rows)
+            {
+                var mod = ((GUIMod)row.Tag);
+                row.Visible = mainModList.IsVisible(mod);
+            }
+            
+            ModList.Rows.AddRange(rows.Where(row=&gt;row.Visible).OrderBy(row=&gt;((GUIMod)row.Tag).Name).ToArray());
+            
+        }
+
+        private void UpdateModsList(Boolean repo_updated=false)
+        {
+            Util.Invoke(this, ()=&gt;_UpdateModsList(repo_updated));
+        }
+
+
+        private void _UpdateModsList(bool repo_updated)
+        {
+            Registry registry = RegistryManager.Instance(CurrentInstance).registry;
+            
+            var ckanModules = registry.Available(CurrentInstance.Version()).Concat(
+                registry.Incompatible(CurrentInstance.Version())).ToList();
+            var gui_mods = new HashSet&lt;GUIMod&gt;(ckanModules.Select(m =&gt; new GUIMod(m, registry, CurrentInstance.Version())));            
+            var old_modules = new HashSet&lt;GUIMod&gt;(mainModList.Modules);
+            if (repo_updated)
+            {
+                foreach (var gui_mod in gui_mods.Where(m =&gt; !old_modules.Contains(m)))
+                {
+                    gui_mod.IsNew = true;
+                }
+            }
+            else
+            {
+                //Copy the new mod flag from the old list.
+                var old_new_mods = new HashSet&lt;GUIMod&gt;(old_modules.Where(m =&gt; m.IsNew));
+                foreach (var gui_mod in gui_mods.Where(m =&gt; old_new_mods.Contains(m)))
+                {
+                    gui_mod.IsNew = true;
+                }
+            }
+            mainModList.Modules = new ReadOnlyCollection&lt;GUIMod&gt;(gui_mods.ToList());
+            var rows = mainModList.ConstructModList(mainModList.Modules);
+            ModList.Rows.Clear();
+            ModList.Rows.AddRange(rows.ToArray());
+            ModList.Sort(ModList.Columns[2], ListSortDirection.Ascending);
+
+            //TODO Consider using smart enum patten so stuff like this is easier
+            FilterToolButton.DropDownItems[0].Text = String.Format(&quot;Compatible ({0})&quot;,
+                mainModList.CountModsByFilter(GUIModFilter.Compatible));
+            FilterToolButton.DropDownItems[1].Text = String.Format(&quot;Installed ({0})&quot;,
+                mainModList.CountModsByFilter(GUIModFilter.Installed));
+            FilterToolButton.DropDownItems[2].Text = String.Format(&quot;Upgradeable ({0})&quot;,
+                mainModList.CountModsByFilter(GUIModFilter.InstalledUpdateAvailable));
+            FilterToolButton.DropDownItems[3].Text = String.Format(&quot;New in repository ({0})&quot;,
+                mainModList.CountModsByFilter(GUIModFilter.NewInRepository));
+            FilterToolButton.DropDownItems[4].Text = String.Format(&quot;Not installed ({0})&quot;,
+                mainModList.CountModsByFilter(GUIModFilter.NotInstalled));
+            FilterToolButton.DropDownItems[5].Text = String.Format(&quot;Incompatible ({0})&quot;,
+                mainModList.CountModsByFilter(GUIModFilter.Incompatible));
+            FilterToolButton.DropDownItems[6].Text = String.Format(&quot;All ({0})&quot;,
+                mainModList.CountModsByFilter(GUIModFilter.All));
+
+            var has_any_updates = gui_mods.Any(mod =&gt; mod.HasUpdate);
+            UpdateAllToolButton.Enabled = has_any_updates;
+            UpdateFilters(this);
+        }
+
+        public void MarkModForInstall(string identifier, bool uninstall = false)
+        {
+            Util.Invoke(this, () =&gt; _MarkModForInstall(identifier));
+        }
+
+        private void _MarkModForInstall(string identifier, bool uninstall = false)
+        {
+            foreach (DataGridViewRow row in ModList.Rows)
+            {
+                var mod = (GUIMod)row.Tag;
+                if (mod.Identifier == identifier)
+                {
+                    mod.IsInstallChecked = true;
+                    //TODO Fix up MarkMod stuff when I commit the GUIConflict
+                    (row.Cells[0] as DataGridViewCheckBoxCell).Value = !uninstall;
+                    break;
+                }
+            }
+        }
+
+        public void MarkModForUpdate(string identifier)
+        {
+            Util.Invoke(this, () =&gt; _MarkModForUpdate(identifier));
+        }
+
+        public void _MarkModForUpdate(string identifier)
+        {
+            foreach (DataGridViewRow row in ModList.Rows)
+            {
+                var mod = (GUIMod)row.Tag;
+                if (mod.Identifier == identifier)
+                {
+                    (row.Cells[1] as DataGridViewCheckBoxCell).Value = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    public class MainModList
+    {
+
+        internal List&lt;DataGridViewRow&gt; FullListOfModRows;
+        public MainModList(ModFiltersUpdatedEvent onModFiltersUpdated)
+        {
+            Modules = new ReadOnlyCollection&lt;GUIMod&gt;(new List&lt;GUIMod&gt;());
+            ModFiltersUpdated += onModFiltersUpdated!=null? onModFiltersUpdated : (source) =&gt; { };
+            ModFiltersUpdated(this);
+        }
+
+        public delegate void ModFiltersUpdatedEvent(MainModList source);
+
+        public event ModFiltersUpdatedEvent ModFiltersUpdated;
+        public ReadOnlyCollection&lt;GUIMod&gt; Modules { get; set; }
+
+        public GUIModFilter ModFilter
+        {
+            get { return _modFilter; }
+            set
+            {
+                var old = _modFilter;
+                _modFilter = value;
+                if (!old.Equals(value)) ModFiltersUpdated(this);
+            }
+        }
+
+        public string ModNameFilter
+        {
+            get { return _modNameFilter; }
+            set
+            {
+                var old = _modNameFilter;
+                _modNameFilter = value;
+                if (!old.Equals(value)) ModFiltersUpdated(this);
+            }
+        }
+
+        public string ModAuthorFilter
+        {
+            get { return _modAuthorFilter; }
+            set
+            {
+                var old = _modAuthorFilter;
+                _modAuthorFilter = value;
+                if (!old.Equals(value)) ModFiltersUpdated(this);
+            }
+        }
+
+        private GUIModFilter _modFilter = GUIModFilter.Compatible;
+        private string _modNameFilter = String.Empty;
+        private string _modAuthorFilter = String.Empty;
+
+        /// &lt;summary&gt;
+        /// This function returns a changeset based on the selections of the user. 
+        /// Currently returns null if a conflict is detected.        
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;registry&quot;&gt;&lt;/param&gt;
+        /// &lt;param name=&quot;current_instance&quot;&gt;&lt;/param&gt;
+        public List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt; ComputeChangeSetFromModList(Registry registry, KSP current_instance)
+        {
+            var changeset = new HashSet&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;();
+            var modulesToInstall = new HashSet&lt;string&gt;();
+            var modulesToRemove = new HashSet&lt;string&gt;();
+
+            foreach (var mod in Modules.Where(mod =&gt; mod.IsInstallable()))
+            {
+                if (mod.IsInstalled)
+                {
+                    if (!mod.IsInstallChecked)
+                    {
+                        modulesToRemove.Add(mod.Identifier);
+                        changeset.Add(new KeyValuePair&lt;CkanModule, GUIModChangeType&gt;(mod.ToCkanModule(),
+                            GUIModChangeType.Remove));
+                    }
+                    else if (mod.IsInstallChecked &amp;&amp; mod.HasUpdate &amp;&amp; mod.IsUpgradeChecked)
+                    {
+                        changeset.Add(new KeyValuePair&lt;CkanModule, GUIModChangeType&gt;(mod.ToCkanModule(),
+                            GUIModChangeType.Update));
+                    }
+                }
+                else if (mod.IsInstallChecked)
+                {
+                    modulesToInstall.Add(mod.Identifier);
+                }
+            }
+
+            RelationshipResolverOptions options = RelationshipResolver.DefaultOpts();
+            options.with_recommends = false;
+            options.without_toomanyprovides_kraken = true;
+            options.without_enforce_consistency = true;
+
+            RelationshipResolver resolver;
+            var installed_modules = new HashSet&lt;string&gt;(registry.InstalledModules.Select(m =&gt; m.identifier));
+            try
+            {                
+                modulesToInstall.UnionWith(installed_modules);
+                var modules = modulesToInstall.Where(m =&gt; !modulesToRemove.Contains(m)).ToList();
+                resolver = new RelationshipResolver(modules, options, registry, current_instance.Version());
+            }
+            catch (Exception)
+            {
+                //TODO FIX this so the UI reacts.
+                return null;
+            }
+            var install_or_installed = resolver.ModList();
+            changeset.UnionWith(
+                install_or_installed.Where(m=&gt;!installed_modules.Contains(m.identifier))
+                    .Select(mod =&gt; new KeyValuePair&lt;CkanModule, GUIModChangeType&gt;(mod, GUIModChangeType.Install)));
+
+
+            ModuleInstaller installer = ModuleInstaller.GetInstance(current_instance, GUI.user);
+
+            foreach (var reverseDependencies in modulesToRemove.Select(mod =&gt; installer.FindReverseDependencies(mod)))
+            {
+                //TODO This would be a good place to have a event that alters the row&#39;s graphics to show it will be removed
+
+                //TODO This currently gets the latest version. This may cause the displayed version to wrong in the changset. 
+                var modules = reverseDependencies.Select(rDep =&gt; registry.LatestAvailable(rDep, null));
+                changeset.UnionWith(
+                    modules.Select(mod =&gt; new KeyValuePair&lt;CkanModule, GUIModChangeType&gt;(mod, GUIModChangeType.Remove)));
+            }
+
+            return changeset.ToList();
+        }
+
+        public bool IsVisible(GUIMod mod)
+        {
+
+            var nameMatchesFilter = IsNameInNameFilter(mod);
+            var authorMatchesFilter = IsAuthorInauthorFilter(mod);
+            var modMatchesType = IsModInFilter(mod);
+            var isVisible = nameMatchesFilter &amp;&amp; modMatchesType &amp;&amp; authorMatchesFilter;
+            return isVisible;
+        }
+
+   
+
+        public int CountModsByFilter(GUIModFilter filter)
+        {
+
+            switch (filter)
+            {
+                case GUIModFilter.Compatible:
+                    return Modules.Count(m =&gt; !m.IsIncompatible);
+                case GUIModFilter.Installed:
+                    return Modules.Count(m =&gt; m.IsInstalled);
+                case GUIModFilter.InstalledUpdateAvailable:
+                    return Modules.Count(m =&gt; m.HasUpdate);
+                case GUIModFilter.NewInRepository:
+                    return Modules.Count(m=&gt;m.IsNew);
+                case GUIModFilter.NotInstalled:
+                    return Modules.Count(m =&gt; !m.IsInstalled);
+                case GUIModFilter.Incompatible:
+                    return Modules.Count(m =&gt; m.IsIncompatible);            
+                case GUIModFilter.All:
+                    return Modules.Count();
+            }
+            throw new Kraken(&quot;Unknown filter type in CountModsByFilter&quot;);
+        }
+
+        public IEnumerable&lt;DataGridViewRow&gt; ConstructModList(IEnumerable&lt;GUIMod&gt; modules)
+        {
+            FullListOfModRows = new List&lt;DataGridViewRow&gt;();
+            foreach (var mod in modules)
+            {
+                var item = new DataGridViewRow {Tag = mod};
+
+                var installedCell = mod.IsInstallable()
+                    ? (DataGridViewCell) new DataGridViewCheckBoxCell()
+                    : new DataGridViewTextBoxCell();
+                installedCell.Value = mod.IsIncompatible
+                    ? &quot;-&quot;
+                    : (!mod.IsAutodetected ? (object) mod.IsInstalled : &quot;AD&quot;);
+
+                var updateCell = !mod.IsInstallable() || !mod.HasUpdate
+                    ? (DataGridViewCell) new DataGridViewTextBoxCell()
+                    : new DataGridViewCheckBoxCell();
+                updateCell.Value = !mod.IsInstallable() || !mod.HasUpdate
+                    ? &quot;-&quot;
+                    : (object) false;
+
+                var nameCell = new DataGridViewTextBoxCell {Value = mod.Name};
+                var authorCell = new DataGridViewTextBoxCell {Value = mod.Authors};
+                var installedVersionCell = new DataGridViewTextBoxCell {Value = mod.InstalledVersion};
+                var latestVersionCell = new DataGridViewTextBoxCell {Value = mod.LatestVersion};
+                var descriptionCell = new DataGridViewTextBoxCell {Value = mod.Abstract};
+                var homepageCell = new DataGridViewLinkCell {Value = mod.Homepage};
+
+                item.Cells.AddRange(installedCell, updateCell,
+                    nameCell, authorCell,
+                    installedVersionCell, latestVersionCell, 
+                    descriptionCell, homepageCell);
+
+                installedCell.ReadOnly = !mod.IsInstallable();
+                updateCell.ReadOnly = !mod.IsInstallable() || !mod.HasUpdate;
+
+                FullListOfModRows.Add(item);
+            }
+            return FullListOfModRows;
+        }
+
+        private bool IsNameInNameFilter(GUIMod mod)
+        {
+            return mod.Name.IndexOf(ModNameFilter, StringComparison.InvariantCultureIgnoreCase) != -1;
+        }
+
+        private bool IsAuthorInauthorFilter(GUIMod mod)
+        {
+            return mod.Authors.IndexOf(ModAuthorFilter, StringComparison.InvariantCultureIgnoreCase) != -1;
+        }
+        
+
+        private bool IsModInFilter(GUIMod m)
+        {     
+            switch (ModFilter)
+            {
+                case GUIModFilter.Compatible:
+                    return !m.IsIncompatible;
+                case GUIModFilter.Installed:
+                    return m.IsInstalled;
+                case GUIModFilter.InstalledUpdateAvailable:
+                    return m.IsInstalled &amp;&amp; m.HasUpdate;
+                case GUIModFilter.NewInRepository:
+                    return m.IsNew;
+                case GUIModFilter.NotInstalled:
+                    return !m.IsInstalled;
+                case GUIModFilter.Incompatible:
+                    return m.IsIncompatible;
+                case GUIModFilter.All:
+                    return true;
+            }
+            throw new Kraken(&quot;Unknown filter type in IsModInFilter&quot;);
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[13,9,13,10,0],[14,13,14,50,0],[15,9,15,10,0],[18,9,18,10,0],[19,13,19,33,0],[19,34,19,41,0],[24,13,24,81,0],[25,13,25,59,0],[26,13,26,34,0],[28,13,28,20,0],[28,33,28,37,0],[28,22,28,29,0],[29,13,29,14,0],[30,17,30,45,0],[31,17,31,58,0],[32,13,32,14,0],[28,30,28,32,0],[34,13,34,51,0],[34,62,34,77,0],[34,99,34,112,0],[36,9,36,10,0],[39,9,39,10,0],[40,13,40,35,0],[40,64,40,66,0],[41,9,41,10,0],[45,9,45,10,0],[46,13,46,84,0],[48,13,49,76,0],[50,13,50,72,0],[50,122,50,125,0],[51,13,51,72,0],[52,13,52,30,0],[53,13,53,14,0],[54,17,54,24,0],[54,41,54,61,0],[54,85,54,86,0],[54,26,54,37,0],[55,17,55,18,0],[56,21,56,42,0],[57,17,57,18,0],[54,38,54,40,0],[58,13,58,14,0],[60,13,60,14,0],[62,17,62,79,0],[62,86,62,89,0],[63,17,63,24,0],[63,41,63,61,0],[63,85,63,86,0],[63,26,63,37,0],[64,17,64,18,0],[65,21,65,42,0],[66,17,66,18,0],[63,38,63,40,0],[67,13,67,14,0],[68,13,68,85,0],[69,13,69,74,0],[70,13,70,34,0],[71,13,71,51,0],[72,13,72,75,0],[75,13,76,73,0],[77,13,78,72,0],[79,13,80,87,0],[81,13,82,78,0],[83,13,84,75,0],[85,13,86,75,0],[87,13,88,66,0],[90,13,90,55,0],[90,68,90,70,0],[91,13,91,59,0],[92,13,92,33,0],[93,9,93,10,0],[96,9,96,10,0],[97,13,97,37,0],[97,67,97,69,0],[98,9,98,10,0],[101,9,101,10,0],[102,13,102,20,0],[102,45,102,57,0],[102,22,102,41,0],[103,13,103,14,0],[104,17,104,43,0],[105,17,105,50,0],[106,17,106,18,0],[107,21,107,49,0],[109,21,109,83,0],[110,21,110,27,0],[112,13,112,14,0],[102,42,102,44,0],[113,9,113,10,0],[116,9,116,10,0],[117,13,117,37,0],[117,66,117,68,0],[118,9,118,10,0],[121,9,121,10,0],[122,13,122,20,0],[122,45,122,57,0],[122,22,122,41,0],[123,13,123,14,0],[124,17,124,43,0],[125,17,125,50,0],[126,17,126,18,0],[127,21,127,77,0],[128,21,128,27,0],[130,13,130,14,0],[122,42,122,44,0],[131,9,131,10,0],[176,13,176,14,0],[177,17,177,44,0],[178,17,178,42,0],[179,17,179,40,0],[179,41,179,65,0],[180,13,180,14,0],[199,22,199,29,0],[200,13,200,14,0],[201,17,201,37,0],[202,17,202,18,0],[203,21,203,47,0],[204,21,204,22,0],[205,25,205,61,0],[206,25,207,55,0],[208,21,208,22,0],[209,26,209,92,0],[210,21,210,22,0],[211,25,212,55,0],[213,21,213,22,0],[214,17,214,18,0],[215,22,215,47,0],[216,17,216,18,0],[217,21,217,58,0],[218,17,218,18,0],[219,13,219,14,0],[247,22,247,45,0],[248,13,248,14,0],[252,17,252,66,0],[252,102,252,104,0],[253,17,254,43,0],[254,119,254,122,0],[255,13,255,14,0],[292,13,292,74,0],[354,21,354,42,0],[356,21,356,57,0],[358,21,358,36,0],[360,21,360,43,0],[362,21,362,45,0],[364,21,364,33,0],[366,13,366,70,0],[34,51,34,62,0],[34,77,34,99,0],[62,79,62,86,0],[90,55,90,68,0],[40,35,40,64,0],[50,72,50,122,0],[54,61,54,85,0],[63,61,63,85,0],[97,37,97,67,0],[117,37,117,66,0],[199,54,199,73,0],[242,36,242,113,0],[254,43,254,119,0],[278,47,278,64,0],[280,47,280,60,0],[282,47,282,58,0],[284,45,284,52,0],[286,47,286,61,0],[288,47,288,63,0],[241,47,241,88,0],[247,79,247,117,0],[252,66,252,102,0],[183,9,183,67,1],[184,9,184,54,1],[185,9,185,56,1],[138,9,138,71,1],[139,9,139,10,1],[140,13,140,74,1],[141,13,141,95,1],[141,96,141,97,1],[141,98,141,99,1],[142,13,142,37,1],[143,9,143,10,1],[148,53,148,57,1],[148,58,148,62,1],[152,17,152,18,1],[152,19,152,37,1],[152,38,152,39,1],[154,13,154,14,1],[155,17,155,38,1],[156,17,156,36,1],[157,17,157,40,1],[157,41,157,65,1],[158,13,158,14,1],[163,17,163,18,1],[163,19,163,41,1],[163,42,163,43,1],[165,13,165,14,1],[166,17,166,42,1],[167,17,167,40,1],[168,17,168,40,1],[168,41,168,65,1],[169,13,169,14,1],[174,17,174,18,1],[174,19,174,43,1],[174,44,174,45,1],[194,9,194,10,1],[195,13,195,87,1],[196,13,196,58,1],[197,13,197,57,1],[199,13,199,20,1],[199,33,199,54,1],[199,73,199,74,1],[199,30,199,32,1],[221,13,221,86,1],[222,13,222,45,1],[223,13,223,59,1],[224,13,224,56,1],[227,13,227,95,1],[227,107,227,110,1],[229,13,229,14,1],[230,17,230,63,1],[231,17,231,59,1],[231,87,231,98,1],[232,17,232,109,1],[233,13,233,14,1],[234,13,234,30,1],[235,13,235,14,1],[237,17,237,29,1],[239,13,239,59,1],[240,13,241,47,1],[241,88,242,36,1],[242,113,242,116,1],[245,13,245,97,1],[247,13,247,20,1],[247,49,247,79,1],[247,117,247,118,1],[247,46,247,48,1],[257,13,257,39,1],[258,9,258,10,1],[261,9,261,10,1],[263,13,263,61,1],[264,13,264,67,1],[265,13,265,53,1],[266,13,266,88,1],[267,13,267,30,1],[268,9,268,10,1],[273,9,273,10,1],[275,13,275,28,1],[278,21,278,47,1],[278,64,278,66,1],[280,21,280,47,1],[280,60,280,62,1],[282,21,282,47,1],[282,58,282,60,1],[284,21,284,45,1],[284,52,284,54,1],[286,21,286,47,1],[286,61,286,63,1],[288,21,288,47,1],[288,63,288,65,1],[290,21,290,44,1],[293,9,293,10,1],[296,9,296,10,1],[297,13,297,61,1],[298,13,298,20,1],[298,33,298,40,1],[298,22,298,29,1],[299,13,299,14,1],[300,17,300,60,1],[302,17,304,53,1],[305,17,307,79,1],[309,17,311,54,1],[312,17,314,38,1],[316,17,316,79,1],[317,17,317,84,1],[318,17,318,103,1],[319,17,319,97,1],[320,17,320,90,1],[321,17,321,84,1],[323,17,326,52,1],[328,17,328,63,1],[329,17,329,78,1],[331,17,331,45,1],[332,13,332,14,1],[298,30,298,32,1],[333,13,333,38,1],[334,9,334,10,1],[337,9,337,10,1],[338,13,338,103,1],[339,9,339,10,1],[342,9,342,10,1],[343,13,343,108,1],[344,9,344,10,1],[348,9,348,10,1],[349,13,349,31,1],[352,21,352,46,1],[367,9,367,10,1],[141,95,141,96,1],[141,97,141,98,1],[227,95,227,107,1],[231,59,231,87,1]]);
+    </script>
+  </body>
+</html>

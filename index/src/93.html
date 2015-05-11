@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\tests\ckan\relationships\sanitychecker.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Collections.Generic;
+using System.Linq;
+using CKAN;
+using NUnit.Framework;
+using Tests;
+
+// We&#39;re exercising FindReverseDependencies in here, because:
+// - We need a registry
+// - It calls the sanity checker code to do the heavy lifting.
+
+namespace CKANTests
+{
+    [TestFixture]
+    public class SanityChecker
+    {
+        private CKAN.Registry registry;
+        private DisposableKSP ksp;
+
+        [TestFixtureSetUp]
+        public void Setup()
+        {
+            ksp = new DisposableKSP();
+
+            registry = ksp.KSP.Registry;
+            registry.ClearAvailable();
+            registry.ClearDlls();
+            registry.Installed().Clear();
+
+            CKAN.Repo.UpdateRegistry(TestData.TestKAN(), registry, ksp.KSP, new NullUser());
+        }
+
+        [Test]
+        public void Empty()
+        {
+            var list = new List&lt;CkanModule&gt;();
+            Assert.IsTrue(CKAN.SanityChecker.IsConsistent(list));
+        }
+
+        [Test]
+        public void Void()
+        {
+            Assert.IsTrue(CKAN.SanityChecker.IsConsistent(null));
+        }
+
+        [Test]
+        public void DogeCoin()
+        {
+            // Test with a module that depends and conflicts with nothing.
+            var mods = new List&lt;CkanModule&gt; {registry.LatestAvailable(&quot;DogeCoinFlag&quot;,null)};
+
+            Assert.IsTrue(CKAN.SanityChecker.IsConsistent(mods), &quot;DogeCoinFlag&quot;);
+        }
+
+        [Test]
+        public void CustomBiomes()
+        {
+            var mods = new List&lt;CkanModule&gt;();
+
+            mods.Add(registry.LatestAvailable(&quot;CustomBiomes&quot;,null));
+            Assert.IsFalse(CKAN.SanityChecker.IsConsistent(mods), &quot;CustomBiomes without data&quot;);
+
+            mods.Add(registry.LatestAvailable(&quot;CustomBiomesKerbal&quot;,null));
+            Assert.IsTrue(CKAN.SanityChecker.IsConsistent(mods), &quot;CustomBiomes with stock data&quot;);
+
+            mods.Add(registry.LatestAvailable(&quot;CustomBiomesRSS&quot;,null));
+            Assert.IsFalse(CKAN.SanityChecker.IsConsistent(mods), &quot;CustomBiomes with conflicting data&quot;);
+        }
+
+        [Test]
+        public void CustomBiomesWithDlls()
+        {
+            var mods = new List&lt;CkanModule&gt;();
+            var dlls = new List&lt;string&gt;();
+
+            dlls.Add(&quot;CustomBiomes&quot;);
+            Assert.IsTrue(CKAN.SanityChecker.IsConsistent(mods, dlls), &quot;CustomBiomes dll by itself&quot;);
+
+            // This would actually be a terrible thing for users to have, but it tests the
+            // relationship we want.
+            mods.Add(registry.LatestAvailable(&quot;CustomBiomesKerbal&quot;,null));
+            Assert.IsTrue(CKAN.SanityChecker.IsConsistent(mods, dlls), &quot;CustomBiomes DLL, with config added&quot;);
+
+            mods.Add(registry.LatestAvailable(&quot;CustomBiomesRSS&quot;,null));
+            Assert.IsFalse(CKAN.SanityChecker.IsConsistent(mods, dlls), &quot;CustomBiomes with conflicting data&quot;);
+        }
+
+        [Test]
+        public void ConflictWithDll()
+        {
+            var mods = new List&lt;CKAN.Module&gt; { registry.LatestAvailable(&quot;SRL&quot;,null) };
+            var dlls = new List&lt;string&gt; { &quot;QuickRevert&quot; };
+
+            Assert.IsTrue(CKAN.SanityChecker.IsConsistent(mods), &quot;SRL can be installed by itself&quot;);
+            Assert.IsFalse(CKAN.SanityChecker.IsConsistent(mods, dlls), &quot;SRL conflicts with QuickRevert DLL&quot;);
+        }
+
+        [Test]
+        public void ModulesToProvides()
+        {
+            var mods = new List&lt;CKAN.Module&gt;
+            {
+                registry.LatestAvailable(&quot;CustomBiomes&quot;,null),
+                registry.LatestAvailable(&quot;CustomBiomesKerbal&quot;,null),
+                registry.LatestAvailable(&quot;DogeCoinFlag&quot;,null)
+            };
+
+            var provides = CKAN.SanityChecker.ModulesToProvides(mods);
+            Assert.Contains(&quot;CustomBiomes&quot;, provides.Keys);
+            Assert.Contains(&quot;CustomBiomesData&quot;, provides.Keys);
+            Assert.Contains(&quot;CustomBiomesKerbal&quot;, provides.Keys);
+            Assert.Contains(&quot;DogeCoinFlag&quot;, provides.Keys);
+            Assert.AreEqual(4, provides.Keys.Count);
+        }
+
+        [Test]
+        public void FindUnmetDependencies()
+        {
+            var mods = new List&lt;CKAN.Module&gt;();
+            var dlls = new List&lt;string&gt;();
+            Assert.IsEmpty(CKAN.SanityChecker.FindUnmetDependencies(mods, dlls), &quot;Empty list&quot;);
+
+            mods.Add(registry.LatestAvailable(&quot;DogeCoinFlag&quot;,null));
+            Assert.IsEmpty(CKAN.SanityChecker.FindUnmetDependencies(mods, dlls), &quot;DogeCoinFlag&quot;);
+
+            mods.Add(registry.LatestAvailable(&quot;CustomBiomes&quot;,null));
+            Assert.Contains(&quot;CustomBiomesData&quot;, CKAN.SanityChecker.FindUnmetDependencies(mods, dlls).Keys, &quot;Missing CustomBiomesData&quot;);
+
+            mods.Add(registry.LatestAvailable(&quot;CustomBiomesKerbal&quot;,null));
+            Assert.IsEmpty(CKAN.SanityChecker.FindUnmetDependencies(mods, dlls), &quot;CBD+CBK&quot;);
+
+            mods.RemoveAll(x =&gt; x.identifier == &quot;CustomBiomes&quot;);
+            Assert.AreEqual(2, mods.Count, &quot;Checking removed CustomBiomes&quot;);
+
+            Assert.Contains(&quot;CustomBiomes&quot;, CKAN.SanityChecker.FindUnmetDependencies(mods, dlls).Keys, &quot;Missing CustomBiomes&quot;);
+        }
+
+        [Test]
+        public void ReverseDepends()
+        {
+            var mods = new List&lt;CKAN.Module&gt;
+            {
+                registry.LatestAvailable(&quot;CustomBiomes&quot;,null),
+                registry.LatestAvailable(&quot;CustomBiomesKerbal&quot;,null),
+                registry.LatestAvailable(&quot;DogeCoinFlag&quot;,null)
+            };
+
+            // Make sure some of our expectations regarding dependencies are correct.
+            Assert.Contains(&quot;CustomBiomes&quot;, registry.LatestAvailable(&quot;CustomBiomesKerbal&quot;,null).depends.Select(x =&gt; x.name).ToList());
+            Assert.Contains(&quot;CustomBiomesData&quot;, registry.LatestAvailable(&quot;CustomBiomes&quot;,null).depends.Select(x =&gt; x.name).ToList());
+
+            // Removing DCF should only remove itself.
+            var to_remove = new List&lt;string&gt;();
+            to_remove.Add(&quot;DogeCoinFlag&quot;);
+            TestDepends(to_remove, mods, null, to_remove, &quot;DogeCoin Removal&quot;);
+
+            // Removing CB should remove its data, and vice-versa.
+            to_remove.Clear();
+            to_remove.Add(&quot;CustomBiomes&quot;);
+            var expected = new List&lt;string&gt;();
+            expected.Add(&quot;CustomBiomes&quot;);
+            expected.Add(&quot;CustomBiomesKerbal&quot;);
+            TestDepends(to_remove, mods, null, expected, &quot;CustomBiomes removed&quot;);
+
+            // We expect the same result removing CBK
+            to_remove.Clear();
+            to_remove.Add(&quot;CustomBiomesKerbal&quot;);
+            TestDepends(to_remove, mods, null, expected, &quot;CustomBiomesKerbal removed&quot;);
+
+            // And we expect the same result if we try to remove both.
+            to_remove.Add(&quot;CustomBiomes&quot;);
+            TestDepends(to_remove, mods, null, expected, &quot;CustomBiomesKerbal and data removed&quot;);
+
+            // Finally, if we try to remove nothing, we shold get back the empty set.
+            expected.Clear();
+            to_remove.Clear();
+            TestDepends(to_remove, mods, null, expected, &quot;Removing nothing&quot;);
+
+        }
+
+        private void TestDepends(List&lt;string&gt; to_remove, List&lt;CKAN.Module&gt; mods, List&lt;string&gt; dlls, List&lt;string&gt; expected, string message)
+        {
+            dlls = dlls ?? new List&lt;string&gt;();
+
+            var remove_count = to_remove.Count;
+            var dll_count = dlls.Count;
+            var mods_count = mods.Count;
+
+            var results = CKAN.Registry.FindReverseDependencies(to_remove, mods, dlls);
+
+            // Make sure nothing changed.
+            Assert.AreEqual(remove_count, to_remove.Count, message + &quot; remove count&quot;);
+            Assert.AreEqual(dll_count, dlls.Count, message + &quot; dll count&quot;);
+            Assert.AreEqual(mods_count, mods.Count, message + &quot; mods count&quot;);
+
+            // Check our actual results.
+            CollectionAssert.AreEquivalent(expected, results, message);
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[21,9,21,10,1],[22,13,22,39,1],[24,13,24,41,1],[25,13,25,39,1],[26,13,26,34,1],[27,13,27,42,1],[29,13,29,93,1],[30,9,30,10,1],[34,9,34,10,1],[35,13,35,47,1],[36,13,36,66,1],[37,9,37,10,1],[41,9,41,10,1],[42,13,42,66,1],[43,9,43,10,1],[47,9,47,10,1],[49,13,49,93,1],[51,13,51,82,1],[52,9,52,10,1],[56,9,56,10,1],[57,13,57,47,1],[59,13,59,69,1],[60,13,60,96,1],[62,13,62,75,1],[63,13,63,98,1],[65,13,65,72,1],[66,13,66,105,1],[67,9,67,10,1],[71,9,71,10,1],[72,13,72,47,1],[73,13,73,43,1],[75,13,75,38,1],[76,13,76,102,1],[80,13,80,75,1],[81,13,81,111,1],[83,13,83,72,1],[84,13,84,111,1],[85,9,85,10,1],[89,9,89,10,1],[90,13,90,87,1],[91,13,91,59,1],[93,13,93,100,1],[94,13,94,111,1],[95,9,95,10,1],[99,9,99,10,1],[100,13,105,15,1],[107,13,107,71,1],[108,13,108,60,1],[109,13,109,64,1],[110,13,110,66,1],[111,13,111,60,1],[112,13,112,53,1],[113,9,113,10,1],[117,9,117,10,1],[118,13,118,48,1],[119,13,119,43,1],[120,13,120,96,1],[122,13,122,69,1],[123,13,123,98,1],[125,13,125,69,1],[126,13,126,136,1],[128,13,128,75,1],[129,13,129,93,1],[131,13,131,33,1],[131,63,131,65,1],[132,13,132,77,1],[134,13,134,128,1],[135,9,135,10,1],[139,9,139,10,1],[140,13,145,15,1],[148,13,148,117,1],[148,123,148,135,1],[149,13,149,115,1],[149,121,149,133,1],[152,13,152,48,1],[153,13,153,43,1],[154,13,154,79,1],[157,13,157,31,1],[158,13,158,43,1],[159,13,159,47,1],[160,13,160,42,1],[161,13,161,48,1],[162,13,162,82,1],[165,13,165,31,1],[166,13,166,49,1],[167,13,167,88,1],[170,13,170,43,1],[171,13,171,97,1],[174,13,174,30,1],[175,13,175,31,1],[176,13,176,78,1],[178,9,178,10,1],[181,9,181,10,1],[182,13,182,47,1],[184,13,184,48,1],[185,13,185,40,1],[186,13,186,41,1],[188,13,188,88,1],[191,13,191,87,1],[192,13,192,76,1],[193,13,193,78,1],[196,13,196,72,1],[197,9,197,10,1],[131,33,131,63,1],[148,117,148,123,1],[149,115,149,121,1]]);
+    </script>
+  </body>
+</html>

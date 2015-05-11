@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-cmdline\action\update.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
+using log4net;
+
+namespace CKAN.CmdLine
+{
+    public class Update : ICommand
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof(Update));
+
+        public IUser user { get; set; }
+
+        public Update(IUser user)
+        {
+            this.user = user;
+        }
+
+        public int RunCommand(CKAN.KSP ksp, object raw_options)
+        {
+            UpdateOptions options = (UpdateOptions) raw_options;
+
+            List&lt;CkanModule&gt; available_prior = null;
+
+            user.RaiseMessage(&quot;Downloading updates...&quot;);
+
+            if (options.list_changes)
+            {
+                // Get a list of available modules prior to the update.
+                available_prior = ksp.Registry.Available(ksp.Version());
+            }
+
+            try
+            {
+                if (options.update_all)
+                {
+                    UpdateRepository(ksp);
+                }
+                else
+                {
+                    UpdateRepository(ksp, options.repo);
+                }
+            }
+            catch (MissingCertificateKraken kraken)
+            {
+                // Handling the kraken means we have prettier output.
+                user.RaiseMessage(kraken.ToString());
+                return Exit.ERROR;
+            }
+
+            if (options.list_changes)
+            {
+                PrintChanges(available_prior, ksp.Registry.Available(ksp.Version()));
+            }
+
+            return Exit.OK;
+        }
+
+        /// &lt;summary&gt;
+        /// Locates the changes between the prior and post state of the modules..
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;modules_prior&quot;&gt;List of the available modules prior to the update.&lt;/param&gt;
+        /// &lt;param name=&quot;modules_post&quot;&gt;List of the available modules after the update.&lt;/param&gt;
+        private void PrintChanges(List&lt;CkanModule&gt; modules_prior, List&lt;CkanModule&gt; modules_post)
+        {
+            // Check for new modules.
+            List&lt;CkanModule&gt; added = modules_post.Where(a =&gt; !modules_prior.Select(b =&gt; b.name).Contains(a.name)).ToList();
+
+            // Check for removed modules.
+            List&lt;CkanModule&gt; removed = modules_prior.Where(a =&gt; !modules_post.Select(b =&gt; b.name).Contains(a.name)).ToList();
+
+            // Check for updated modules.
+            // TODO: There is most likely a better way of doing this in a single statement using LINQ.
+            List&lt;CkanModule&gt; updated = new List&lt;CkanModule&gt;();
+
+            // First, get the identifiers and version of all the mods.
+            Dictionary&lt;string, Version&gt; identifiers_prior = (from a in modules_prior select new {a.identifier, a.version}).ToDictionary(x =&gt; x.identifier, x =&gt; x.version);
+            Dictionary&lt;string, Version&gt; identifiers_post = (from b in modules_post select new {b.identifier, b.version}).ToDictionary(x =&gt; x.identifier, x =&gt; x.version);
+
+            // Compare the two lists.
+            foreach (var a in identifiers_prior)
+            {
+                // Check that the mod is still there after the update.
+                if (identifiers_post.ContainsKey(a.Key))
+                {
+                    // Check that the version has increased.
+                    if (identifiers_post[a.Key].IsGreaterThan(a.Value))
+                    {
+                        // Extract the mod information from the updated modules list.
+                        updated.Add(modules_post.Where(b =&gt; b.identifier == a.Key).First());
+                    }
+                }
+            }
+
+            // Print the changes.
+            user.RaiseMessage(&quot;Found {0} new modules, {1} removed modules and {2} updated modules.&quot;, added.Count, removed.Count, updated.Count);
+
+            if (added.Count &gt; 0)
+            {
+                PrintModules(&quot;New modules [Name (CKAN identifier)]:&quot;, added);
+            }
+
+            if (removed.Count &gt; 0)
+            {
+                PrintModules(&quot;Removed modules [Name (CKAN identifier)]:&quot;, removed);
+            }
+
+            if (updated.Count &gt; 0)
+            {
+                PrintModules(&quot;Updated modules [Name (CKAN identifier)]:&quot;, updated);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Prints a message and a list of modules. Ends with a blank line.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;message&quot;&gt;The message to print.&lt;/param&gt;
+        /// &lt;param name=&quot;modules&quot;&gt;The modules to list.&lt;/param&gt;
+        private void PrintModules(string message, List&lt;CkanModule&gt; modules)
+        {
+            // Check input.
+            if (message == null)
+            {
+                throw new BadCommandKraken(&quot;Message cannot be null.&quot;);
+            }
+
+            if (modules == null)
+            {
+                throw new BadCommandKraken(&quot;List of modules cannot be null.&quot;);
+            }
+
+            user.RaiseMessage(message);
+
+            foreach(CkanModule module in modules)
+            {
+                user.RaiseMessage(&quot;{0} ({1})&quot;, module.name, module.identifier);
+            }
+
+            user.RaiseMessage(&quot;&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Updates the repository.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;ksp&quot;&gt;The KSP instance to work on.&lt;/param&gt;
+        /// &lt;param name=&quot;repository&quot;&gt;Repository to update. If null all repositories are used.&lt;/param&gt;
+        private void UpdateRepository(CKAN.KSP ksp, string repository = null)
+        {
+            RegistryManager registry_manager = RegistryManager.Instance(ksp);
+
+            // Update the repository/repositories.
+            int updated = CKAN.Repo.Update(registry_manager, ksp, user, true, repository);
+
+            user.RaiseMessage(&quot;Updated information on {0} available modules&quot;, updated);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[13,29,13,33,0],[13,34,13,38,0],[15,9,15,34,0],[17,13,17,30,0],[18,9,18,10,0],[22,13,22,65,0],[24,13,24,53,0],[26,13,26,57,0],[28,13,28,38,0],[31,17,31,73,0],[36,17,36,40,0],[38,21,38,43,0],[39,17,39,18,0],[42,21,42,57,0],[44,13,44,14,0],[45,13,45,52,0],[48,17,48,54,0],[49,17,49,35,0],[52,13,52,38,0],[54,17,54,86,0],[57,13,57,28,0],[58,9,58,10,0],[68,13,68,62,0],[68,113,68,124,0],[71,13,71,65,0],[71,115,71,126,0],[75,13,75,63,0],[78,13,78,93,0],[78,122,78,142,0],[78,154,78,161,0],[78,170,78,172,0],[79,13,79,91,0],[79,120,79,140,0],[79,152,79,159,0],[79,168,79,170,0],[82,31,82,48,0],[82,22,82,27,0],[85,17,85,57,0],[88,21,88,72,0],[91,25,91,61,0],[91,82,91,93,0],[82,28,82,30,0],[97,13,97,145,0],[99,13,99,33,0],[101,17,101,78,0],[104,13,104,35,0],[106,17,106,84,0],[109,13,109,35,0],[111,17,111,84,0],[113,9,113,10,0],[123,13,123,33,0],[125,17,125,71,0],[128,13,128,33,0],[130,17,130,79,0],[133,13,133,40,0],[135,42,135,49,0],[135,21,135,38,0],[137,17,137,80,0],[135,39,135,41,0],[140,13,140,35,0],[141,9,141,10,0],[150,13,150,78,0],[153,13,153,91,0],[155,13,155,88,0],[156,9,156,10,0],[11,9,11,81,0],[68,62,68,89,0],[68,95,68,113,0],[71,65,71,91,0],[71,97,71,115,0],[91,61,91,82,0],[68,89,68,95,0],[71,91,71,97,0],[78,93,78,122,0],[78,142,78,154,0],[78,161,78,170,0],[79,91,79,120,0],[79,140,79,152,0],[79,159,79,168,0]]);
+    </script>
+  </body>
+</html>

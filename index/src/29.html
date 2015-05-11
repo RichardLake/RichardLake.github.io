@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\converters\jsonoldresourceurlconverter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
+namespace CKAN
+{
+    /// &lt;summary&gt;
+    /// Converter to allow old resources fields to be read in newer clients.
+    /// &lt;/summary&gt;
+    public class JsonOldResourceUrlConverter : JsonConverter
+    {
+        public override bool CanConvert(Type object_type)
+        {
+            // We *only* want to be triggered for types that have explicitly
+            // set an attribute in their class saying they can be converted.
+            // By returning false here, we declare we&#39;re not interested in participating
+            // in any other conversions.
+            return false;
+        }
+
+        public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+        {
+            JToken token = JToken.Load(reader);
+
+            // If we&#39;ve got an object, extract the URL, since that&#39;s all we use now.
+            if (token.Type == JTokenType.Object)
+            {
+                return token[&quot;url&quot;].ToObject&lt;Uri&gt;();
+            }
+
+            // Otherwise just return whatever we found, which we hope converts okay. :)
+            return token.ToObject&lt;Uri&gt;();
+        }
+
+        public override bool CanWrite
+        {
+            get { return false; }
+        }
+
+        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+        {
+            throw new NotImplementedException();
+        }
+
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[13,9,13,10,0],[18,13,18,26,0],[19,9,19,10,0],[41,9,41,10,0],[42,13,42,49,0],[22,9,22,10,1],[23,13,23,48,1],[26,13,26,49,1],[27,13,27,14,1],[28,17,28,53,1],[32,13,32,42,1],[33,9,33,10,1],[37,17,37,18,1],[37,19,37,32,1],[37,33,37,34,1]]);
+    </script>
+  </body>
+</html>

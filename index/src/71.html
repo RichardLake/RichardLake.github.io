@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\newrepodialog.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Windows.Forms;
+
+namespace CKAN
+{
+
+
+    public partial class NewRepoDialog : Form
+    {
+        public NewRepoDialog()
+        {
+            InitializeComponent();
+            StartPosition = FormStartPosition.CenterScreen;
+        }
+
+        private void NewRepoDialog_Load(object sender, EventArgs e)
+        {
+            RepositoryList repositories = new RepositoryList();
+
+            try
+            {
+                repositories = Main.FetchMasterRepositoryList();
+            }
+            catch
+            {
+                ReposListBox.Items.Add(&quot;Failed to fetch master list..&quot;);
+                return;
+            }
+
+            ReposListBox.Items.Clear();
+
+            if (repositories.repositories == null)
+            {
+                ReposListBox.Items.Add(&quot;Failed to fetch master list..&quot;);
+                return;
+            }
+
+            foreach (Repository repository in repositories.repositories)
+            {
+                ReposListBox.Items.Add(String.Format(&quot;{0} | {1}&quot;, repository.name, repository.uri));
+            }
+        }
+
+        private void ReposListBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (ReposListBox.SelectedItem == null)
+            {
+                return;
+            }
+
+            RepoUrlTextBox.Text = (string) ReposListBox.SelectedItem;
+        }
+
+        private void RepoUrlTextBox_TextChanged(object sender, EventArgs e)
+        {
+            RepoOK.Enabled = RepoUrlTextBox.Text.Length != 0;
+        }
+
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[12,9,12,31,0],[13,9,13,10,0],[14,13,14,35,0],[15,13,15,60,0],[16,9,16,10,0],[19,9,19,10,0],[20,13,20,64,0],[23,13,23,14,0],[24,17,24,65,0],[25,13,25,14,0],[26,13,26,18,0],[27,13,27,14,0],[28,17,28,73,0],[29,17,29,24,0],[32,13,32,40,0],[34,13,34,51,0],[35,13,35,14,0],[36,17,36,73,0],[37,17,37,24,0],[40,13,40,20,0],[40,47,40,72,0],[40,22,40,43,0],[41,13,41,14,0],[42,17,42,101,0],[43,13,43,14,0],[40,44,40,46,0],[44,9,44,10,0],[47,9,47,10,0],[48,13,48,51,0],[49,13,49,14,0],[50,17,50,24,0],[53,13,53,70,0],[54,9,54,10,0],[57,9,57,10,0],[58,13,58,62,0],[59,9,59,10,0]]);
+    </script>
+  </body>
+</html>

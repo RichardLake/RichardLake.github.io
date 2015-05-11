@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\kspmanager.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using CKAN;
+using log4net;
+
+namespace CKAN
+{
+    /// &lt;summary&gt;
+    /// Manage multiple KSP installs.
+    /// &lt;/summary&gt;
+    public class KSPManager
+    {
+        public IUser User { get; set; }
+        public IWin32Registry Win32Registry { get; set; }
+        public KSP CurrentInstance { get; set; }
+
+
+        private static readonly ILog log = LogManager.GetLogger(typeof (KSPManager));
+
+        private readonly SortedList&lt;string, KSP&gt; instances = new SortedList&lt;string, KSP&gt;();
+
+        internal string AutoStartInstance
+        {
+            get { return Win32Registry.AutoStartInstance; }
+            private set
+            {
+                if (!String.IsNullOrEmpty(value) &amp;&amp; !HasInstance(value))
+                {
+                    throw new InvalidKSPInstanceKraken(value);
+                }
+                Win32Registry.AutoStartInstance = value;
+            }
+        }
+
+        public SortedList&lt;string, KSP&gt; Instances
+        {
+            get { return new SortedList&lt;string, KSP&gt;(instances); }            
+        }
+
+
+        public KSPManager(IUser user, IWin32Registry win32_registry = null)
+        {
+            User = user;
+            Win32Registry = win32_registry ?? new Win32Registry();
+            LoadInstancesFromRegistry();
+        }
+
+
+        /// &lt;summary&gt;
+        /// Returns the prefered KSP instance, or null if none can be found.
+        /// 
+        /// This works by checking to see if we&#39;re in a KSP dir first, then the
+        /// registry for an autostart instance, then will try to auto-populate
+        /// by scanning for the game.
+        /// 
+        /// This *will not* touch the registry if we find a portable install.
+        /// 
+        /// This *will* run KSP instance autodetection if the registry is empty.
+        /// 
+        /// This *will* set the current instance, or throw an exception if it&#39;s already set.
+        /// 
+        /// Returns null if we have multiple instances, but none of them are preferred.
+        /// &lt;/summary&gt;
+        public KSP GetPreferredInstance()
+        {
+            if (CurrentInstance != null)
+            {
+                // TODO: Throw a better exception
+                throw new KSPManagerKraken(&quot;Tried to set KSP instance twice!&quot;);
+            }
+
+            CurrentInstance = _GetPreferredInstance();
+            return CurrentInstance;
+        }
+
+        // Actual worker for GetPreferredInstance()
+        internal KSP _GetPreferredInstance()
+        {
+            // First check if we&#39;re part of a portable install
+            // Note that this *does not* register in the registry.
+            string path = KSP.PortableDir();
+
+            if (path != null)
+            {
+                return new KSP(path, User);
+            }
+
+
+            // Return the autostart, if we can find it.
+            if (AutoStartInstance != null)
+            {
+                // We check both null and &quot;&quot; as we can&#39;t write NULL to the registry, so we write an empty string instead
+                // This is neccessary so we can indicate that the user wants to reset the current AutoStartInstance without clearing the windows registry keys!
+                if (AutoStartInstance == &quot;&quot;)
+                {
+                    return null;
+                }
+                if (HasInstance(AutoStartInstance))
+                {
+                    return instances[AutoStartInstance];
+                }
+            }
+
+           
+            // If we only know of a single instance, return that.
+            if (instances.Count == 1)
+            {
+                return instances.First().Value;
+            }
+
+            // If we know of no instances, try to find one.
+            // Otherwise, we know of too many instances!
+            // We don&#39;t know which one to pick, so we return null.
+            return !instances.Any() ? FindAndRegisterDefaultInstance() : null;
+        }
+
+        /// &lt;summary&gt;
+        /// Find and register a default instance by running
+        /// game autodetection code.
+        /// 
+        /// Returns the resulting KSP object if found.
+        /// &lt;/summary&gt;
+        public KSP FindAndRegisterDefaultInstance()
+        {
+            if (instances.Any())
+                throw new KSPManagerKraken(&quot;Attempted to scan for defaults with instances in registry&quot;);
+
+            string gamedir;
+            try
+            {
+                gamedir = KSP.FindGameDir();
+                return AddInstance(&quot;auto&quot;, new KSP(gamedir, User));
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return null;
+            }
+            catch (NotKSPDirKraken)//Todo check carefully if this is nessesary. 
+            {
+                return null;
+            }
+
+            
+        }
+
+        /// &lt;summary&gt;
+        /// Adds a KSP instance to registry.
+        /// Returns the resulting KSP object.
+        /// &lt;/summary&gt;
+        public KSP AddInstance(string name, KSP ksp_instance)
+        {
+            instances.Add(name, ksp_instance);
+            Win32Registry.SetRegistryToInstances(instances, AutoStartInstance);                
+            return ksp_instance;
+        }
+
+        /// &lt;summary&gt;
+        /// Given a string returns a unused valid instance name by postfixing the string
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt; A unused valid instance name.&lt;/returns&gt;
+        /// &lt;param name=&quot;name&quot;&gt;The name to use as a base.&lt;/param&gt;
+        /// &lt;exception cref=&quot;CKAN.Kraken&quot;&gt;Could not find a valid name.&lt;/exception&gt;
+        public string GetNextValidInstanceName(string name)
+        {
+            // Check if the current name is valid.
+            if (InstanceNameIsValid(name))
+            {
+                return name;
+            }
+
+            // Try appending a number to the name.
+            var validName = Enumerable.Repeat(name, 1000)
+                .Select((s, i) =&gt; s + &quot; (&quot; + i + &quot;)&quot;)
+                .FirstOrDefault(InstanceNameIsValid);
+            if (validName != null) return validName;
+
+            // Check if a name with the current timestamp is valid.
+            validName = name + &quot; (&quot; + DateTime.Now + &quot;)&quot;;
+
+            if (InstanceNameIsValid(validName))
+            {
+                return validName;
+            }
+
+            // Give up.
+            throw new Kraken(&quot;Could not return a valid name for the new instance.&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Check if the instance name is valid.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;&lt;c&gt;true&lt;/c&gt;, if name is valid, &lt;c&gt;false&lt;/c&gt; otherwise.&lt;/returns&gt;
+        /// &lt;param name=&quot;name&quot;&gt;Name to check.&lt;/param&gt;
+        private bool InstanceNameIsValid(string name)
+        {
+            // Discard null, empty strings and white space only strings.
+            // Look for the current name in the list of loaded instances.
+            return !String.IsNullOrWhiteSpace(name) &amp;&amp; !HasInstance(name);
+        }
+
+        /// &lt;summary&gt;
+        /// Removes the instance from the registry and saves.
+        /// &lt;/summary&gt;
+        public void RemoveInstance(string name)
+        {
+            instances.Remove(name);
+            Win32Registry.SetRegistryToInstances(instances, AutoStartInstance);
+        }
+
+        /// &lt;summary&gt;
+        /// Renames an instance in the registry and saves.
+        /// &lt;/summary&gt;
+        /// 
+        // TODO: What should we do if our target name already exists?
+        public void RenameInstance(string from, string to)
+        {
+            var ksp = instances[from];
+            instances.Remove(from);
+            instances.Add(to, ksp);
+            Win32Registry.SetRegistryToInstances(instances, AutoStartInstance);
+        }
+
+
+        /// &lt;summary&gt;
+        /// Sets the current instance.
+        /// Throws an InvalidKSPInstanceKraken if not found.
+        /// &lt;/summary&gt;
+        public void SetCurrentInstance(string name)
+        {
+            // TODO: Should we disallow this if _CurrentInstance is already set?
+
+            if (!HasInstance(name))
+            {
+                throw new InvalidKSPInstanceKraken(name);
+            }
+
+            CurrentInstance = instances[name];
+        }
+
+        public void SetCurrentInstanceByPath(string name)
+        {
+            // TODO: Should we disallow this if _CurrentInstance is already set?
+            CurrentInstance = new KSP(name, User);
+        }
+
+        /// &lt;summary&gt;
+        /// Sets the autostart instance in the registry and saves it.
+        /// &lt;/summary&gt;
+        public void SetAutoStart(string name)
+        {
+            if (!HasInstance(name))
+            {
+                throw new InvalidKSPInstanceKraken(name);
+            }
+
+            AutoStartInstance = name;
+        }
+
+        public bool HasInstance(string name)
+        {
+            return instances.ContainsKey(name);
+        }
+
+        public void ClearAutoStart()
+        {
+            Win32Registry.AutoStartInstance = null;
+        }
+
+        public void LoadInstancesFromRegistry()
+        {
+            log.Debug(&quot;Loading KSP instances from registry&quot;);
+
+            instances.Clear();
+
+            foreach (Tuple&lt;string, string&gt; instance in Win32Registry.GetInstances())
+            {
+                var name = instance.Item1;
+                var path = instance.Item2;
+                log.DebugFormat(&quot;Loading {0} from {1}&quot;, name, path);
+                if (KSP.IsKspDir(path))
+                {
+                    instances.Add(name, new KSP(path, User));
+                    log.DebugFormat(&quot;Added {0} at {1}&quot;, name, path);
+                }
+                else
+                {
+                    log.WarnFormat(&quot;{0} at {1} is not a vaild install&quot;, name, path);                    
+                }
+
+                //var ksp = new KSP(path, User);
+                //instances.Add(name, ksp);
+
+                
+            }
+
+            try
+            {
+                AutoStartInstance = Win32Registry.AutoStartInstance;
+            }
+            catch (InvalidKSPInstanceKraken e)
+            {
+                log.WarnFormat(&quot;Auto-start instance was invalid: {0}&quot;, e.Message);
+                AutoStartInstance = null;
+            }
+        }
+
+        public static readonly string steamKSP = Path.Combine(&quot;SteamApps&quot;, &quot;common&quot;, &quot;Kerbal Space Program&quot;);
+        }
+
+
+    }
+
+    public class KSPManagerKraken : Kraken
+    {
+        public KSPManagerKraken(string reason = null, Exception inner_exception = null) : base(reason, inner_exception)
+        {
+        }
+    }
+
+    public class InvalidKSPInstanceKraken : Exception
+    {
+        public string instance;
+
+        public InvalidKSPInstanceKraken(string instance, string reason = null, Exception inner_exception = null)
+            : base(reason, inner_exception)
+        {
+            this.instance = instance;
+        }
+    }
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[317,91,317,120,0],[318,9,318,10,0],[319,9,319,10,0],[39,17,39,18,0],[39,19,39,65,0],[39,66,39,67,0],[69,13,69,14,0],[71,17,71,80,0],[86,13,86,14,0],[87,17,87,44,0],[93,13,93,14,0],[96,17,96,45,0],[97,17,97,18,0],[98,21,98,33,0],[100,17,100,52,0],[101,17,101,18,0],[102,21,102,57,0],[104,13,104,14,0],[126,9,126,10,0],[127,13,127,33,0],[128,17,128,105,0],[132,13,132,14,0],[133,17,133,45,0],[134,17,134,68,0],[136,13,136,47,0],[137,13,137,14,0],[138,17,138,29,0],[140,13,140,36,0],[141,13,141,14,0],[142,17,142,29,0],[146,9,146,10,0],[169,13,169,14,0],[170,17,170,29,0],[180,13,180,58,0],[182,13,182,48,0],[183,13,183,14,0],[184,17,184,34,0],[188,13,188,85,0],[239,13,239,47,0],[240,9,240,10,0],[243,9,243,10,0],[245,13,245,51,0],[246,9,246,10,0],[288,17,288,18,0],[289,21,289,85,0],[290,17,290,18,0],[327,15,327,44,1],[328,9,328,10,1],[329,13,329,38,1],[330,9,330,10,1],[15,29,15,33,1],[15,34,15,38,1],[16,47,16,51,1],[16,52,16,56,1],[17,38,17,42,1],[17,43,17,47,1],[26,17,26,18,1],[26,19,26,58,1],[26,59,26,60,1],[28,13,28,14,1],[29,17,29,73,1],[30,17,30,18,1],[31,21,31,63,1],[33,17,33,57,1],[34,13,34,14,1],[22,9,22,92,1],[43,9,43,76,1],[44,9,44,10,1],[45,13,45,25,1],[46,13,46,67,1],[47,13,47,41,1],[48,9,48,10,1],[67,9,67,10,1],[68,13,68,41,1],[74,13,74,55,1],[75,13,75,36,1],[76,9,76,10,1],[80,9,80,10,1],[83,13,83,45,1],[85,13,85,30,1],[92,13,92,43,1],[108,13,108,38,1],[109,13,109,14,1],[110,17,110,48,1],[116,13,116,79,1],[117,9,117,10,1],[153,9,153,10,1],[154,13,154,47,1],[155,13,155,80,1],[156,13,156,33,1],[157,9,157,10,1],[166,9,166,10,1],[168,13,168,43,1],[174,13,175,35,1],[175,53,176,54,1],[177,13,177,35,1],[177,36,177,53,1],[189,9,189,10,1],[197,9,197,10,1],[200,13,200,75,1],[201,9,201,10,1],[207,9,207,10,1],[208,13,208,36,1],[209,13,209,80,1],[210,9,210,10,1],[218,9,218,10,1],[219,13,219,39,1],[220,13,220,36,1],[221,13,221,36,1],[222,13,222,80,1],[223,9,223,10,1],[231,9,231,10,1],[234,13,234,36,1],[235,13,235,14,1],[236,17,236,58,1],[252,9,252,10,1],[253,13,253,36,1],[254,13,254,14,1],[255,17,255,58,1],[258,13,258,38,1],[259,9,259,10,1],[262,9,262,10,1],[263,13,263,48,1],[264,9,264,10,1],[267,9,267,10,1],[268,13,268,52,1],[269,9,269,10,1],[272,9,272,10,1],[273,13,273,62,1],[275,13,275,31,1],[277,13,277,20,1],[277,56,277,84,1],[277,22,277,52,1],[278,13,278,14,1],[279,17,279,43,1],[280,17,280,43,1],[281,17,281,69,1],[282,17,282,40,1],[283,17,283,18,1],[284,21,284,62,1],[285,21,285,69,1],[286,17,286,18,1],[296,13,296,14,1],[277,53,277,55,1],[299,13,299,14,1],[300,17,300,69,1],[301,13,301,14,1],[302,13,302,47,1],[303,13,303,14,1],[304,17,304,83,1],[305,17,305,42,1],[306,13,306,14,1],[307,9,307,10,1],[20,9,20,86,1],[309,9,309,110,1],[175,35,175,53,1]]);
+    </script>
+  </body>
+</html>

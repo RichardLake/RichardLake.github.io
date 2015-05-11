@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-cmdline\options.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Collections.Generic;
+using CommandLine;
+
+namespace CKAN.CmdLine
+{
+    // Look, parsing options is so easy and beautiful I made
+    // it into a special class for you to admire!
+
+    public class Options
+    {
+        public string action { get; set; }
+        public object options { get; set; }
+
+        /// &lt;summary&gt;
+        /// Returns an options object on success. Prints a default help
+        /// screen and throws a BadCommandKraken on failure.
+        /// &lt;/summary&gt;
+        public Options(string[] args)
+        {
+            Parser.Default.ParseArgumentsStrict
+            (
+                args, new Actions(), (verb, suboptions) =&gt;
+                {
+                    action = verb;
+                    options = suboptions;
+                },
+                delegate
+                {
+                    throw (new BadCommandKraken());
+                }
+            );
+        }
+    }
+        
+    // Actions supported by our client go here.
+    // TODO: Figure out how to do per action help screens.
+
+    internal class Actions
+    {
+
+        [VerbOption(&quot;gui&quot;, HelpText = &quot;Start the CKAN GUI&quot;)]
+        public GuiOptions GuiOptions { get; set; }
+
+        [VerbOption(&quot;gui-with-console&quot;, HelpText = &quot;Start the CKAN GUI with the console visible&quot;)]
+        public GuiOptions GuiConsoleOptions { get; set; }
+
+        [VerbOption(&quot;search&quot;, HelpText = &quot;Search for mods&quot;)]
+        public SearchOptions SearchOptions { get; set; }
+
+        [VerbOption(&quot;upgrade&quot;, HelpText = &quot;Upgrade an installed mod&quot;)]
+        public UpgradeOptions Upgrade { get; set; }
+
+        [VerbOption(&quot;update&quot;, HelpText = &quot;Update list of available mods&quot;)]
+        public UpdateOptions Update { get; set; }
+
+        [VerbOption(&quot;available&quot;, HelpText = &quot;List available mods&quot;)]
+        public AvailableOptions Available { get; set; }
+
+        [VerbOption(&quot;install&quot;, HelpText = &quot;Install a KSP mod&quot;)]
+        public InstallOptions Install { get; set; }
+
+        [VerbOption(&quot;remove&quot;, HelpText = &quot;Remove an installed mod&quot;)]
+        public RemoveOptions Remove { get; set; }
+
+        [VerbOption(&quot;scan&quot;, HelpText = &quot;Scan for manually installed KSP mods&quot;)]
+        public ScanOptions Scan { get; set; }
+
+        [VerbOption(&quot;list&quot;, HelpText = &quot;List installed modules&quot;)]
+        public ListOptions List { get; set; }
+
+        [VerbOption(&quot;show&quot;, HelpText = &quot;Show information about a mod&quot;)]
+        public ShowOptions Show { get; set; }
+
+        [VerbOption(&quot;clean&quot;, HelpText = &quot;Clean away downloaded files from the cache&quot;)]
+        public CleanOptions Clean { get; set; }
+
+        [VerbOption(&quot;repair&quot;, HelpText = &quot;Attempt various automatic repairs&quot;)]
+        public SubCommandOptions Repair { get; set; }
+
+        [VerbOption(&quot;repo&quot;, HelpText = &quot;Manage CKAN repositories&quot;)]
+        public SubCommandOptions KSP { get; set; }
+
+        [VerbOption(&quot;ksp&quot;, HelpText = &quot;Manage KSP installs&quot;)]
+        public SubCommandOptions Repo { get; set; }
+
+        [VerbOption(&quot;version&quot;, HelpText = &quot;Show the version of the CKAN client being used.&quot;)]
+        public VersionOptions Version { get; set; }
+    }
+
+    // Options common to all classes.
+
+    public class CommonOptions
+    {
+        [Option(&#39;v&#39;, &quot;verbose&quot;, DefaultValue = false, HelpText = &quot;Show more of what&#39;s going on when running.&quot;)]
+        public bool Verbose { get; set; }
+
+        [Option(&#39;d&#39;, &quot;debug&quot;, DefaultValue = false, HelpText = &quot;Show debugging level messages. Implies verbose&quot;)]
+        public bool Debug { get; set; }
+
+        [Option(&quot;ksp&quot;, DefaultValue = null, HelpText = &quot;KSP install to use&quot;)]
+        public string KSP { get; set; }
+
+        [Option(&quot;kspdir&quot;, DefaultValue = null, HelpText = &quot;KSP dir to use&quot;)]
+        public string KSPdir { get; set; }
+
+        [Option(&quot;net-useragent&quot;, DefaultValue = null, HelpText = &quot;Set the default user-agent string for HTTP requests&quot;)]
+        public string NetUserAgent { get; set; }
+
+        [Option(&quot;headless&quot;, DefaultValue = null, HelpText = &quot;Set to disable all prompts&quot;)]
+        public bool Headless { get; set; }
+
+        [Option(&quot;asroot&quot;, DefaultValue = null, HelpText = &quot;Allows CKAN to run as root on Linux- based systems&quot;)]
+        public bool AsRoot { get; set; }
+    }
+
+    /// &lt;summary&gt;
+    /// For things which are subcommands (&#39;ksp&#39;, &#39;repair&#39; etc), we just grab a list
+    /// we can pass on.
+    /// &lt;/summary&gt;
+    public class SubCommandOptions : CommonOptions
+    {
+        [ValueList(typeof(List&lt;string&gt;))]
+        public List&lt;string&gt; options { get; set; }
+    }
+
+    // Each action defines its own options that it supports.
+    // Don&#39;t forget to cast to this type when you&#39;re processing them later on.
+
+    internal class InstallOptions : CommonOptions
+    {
+        [OptionArray(&#39;c&#39;, &quot;ckanfiles&quot;, HelpText = &quot;Local CKAN files to process&quot;)]
+        public string[] ckan_files { get; set; }
+
+        [Option(&quot;no-recommends&quot;, HelpText = &quot;Do not install recommended modules&quot;)]
+        public bool no_recommends { get; set; }
+
+        [Option(&quot;with-suggests&quot;, HelpText = &quot;Install suggested modules&quot;)]
+        public bool with_suggests { get; set; }
+
+        [Option(&quot;with-all-suggests&quot;, HelpText = &quot;Install suggested modules all the way down&quot;)]
+        public bool with_all_suggests { get; set; }
+
+        // TODO: How do we provide helptext on this?
+        [ValueList(typeof (List&lt;string&gt;))]
+        public List&lt;string&gt; modules { get; set; }
+    }
+
+    internal class UpgradeOptions : CommonOptions
+    {
+        [Option(&#39;c&#39;, &quot;ckanfile&quot;, HelpText = &quot;Local CKAN file to process&quot;)]
+        public string ckan_file { get; set; }
+
+        [Option(&quot;no-recommends&quot;, HelpText = &quot;Do not install recommended modules&quot;)]
+        public bool no_recommends { get; set; }
+
+        [Option(&quot;with-suggests&quot;, HelpText = &quot;Install suggested modules&quot;)]
+        public bool with_suggests { get; set; }
+
+        [Option(&quot;with-all-suggests&quot;, HelpText = &quot;Install suggested modules all the way down&quot;)]
+        public bool with_all_suggests { get; set; }
+
+        [Option(&quot;all&quot;, HelpText = &quot;Upgrade all available updated modules&quot;)]
+        public bool upgrade_all { get; set; }
+
+        // TODO: How do we provide helptext on this?
+        [ValueList(typeof (List&lt;string&gt;))]
+        public List&lt;string&gt; modules { get; set; }
+    }
+
+    internal class ScanOptions : CommonOptions
+    {
+    }
+
+    internal class ListOptions : CommonOptions
+    {
+        [Option(&quot;porcelain&quot;, HelpText = &quot;Dump raw list of modules, good for shell scripting&quot;)]
+        public bool porcelain { get; set; }
+    }
+
+    internal class VersionOptions : CommonOptions
+    {
+    }
+
+    internal class CleanOptions : CommonOptions
+    {
+    }
+
+    internal class AvailableOptions : CommonOptions
+    {
+    }
+
+    internal class GuiOptions : CommonOptions
+    {
+        [Option(&quot;show-console&quot;, HelpText = &quot;Shows the console while running the GUI&quot;)]
+        public bool ShowConsole { get; set; }
+    }
+
+    internal class UpdateOptions : CommonOptions
+    {
+        // This option is really meant for devs testing their CKAN-meta forks.
+        [Option(&#39;r&#39;, &quot;repo&quot;, HelpText = &quot;CKAN repository to use (experimental!)&quot;)]
+        public string repo { get; set; }
+
+        [Option(&quot;all&quot;, HelpText = &quot;Upgrade all available updated modules&quot;)]
+        public bool update_all { get; set; }
+
+        [Option(&quot;list-changes&quot;, DefaultValue = false, HelpText = &quot;List new and removed modules&quot;)]
+        public bool list_changes { get; set; }
+    }
+
+    internal class RemoveOptions : CommonOptions
+    {
+        [Option(&quot;re&quot;, HelpText = &quot;Parse arguments as regular expressions&quot;)]
+        public bool regex { get; set; }
+
+        [ValueList(typeof(List&lt;string&gt;))]
+        public List&lt;string&gt; modules { get; set; }
+    }
+
+    internal class ShowOptions : CommonOptions
+    {
+        [ValueOption(0)]
+        public string Modname { get; set; }
+    }
+
+    internal class ClearCacheOptions : CommonOptions
+    {
+    }
+
+    internal class SearchOptions : CommonOptions
+    {
+        [ValueOption(0)]
+        public string search_term { get; set; }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[11,32,11,36,0],[11,37,11,41,0],[12,33,12,37,0],[12,38,12,42,0],[18,9,18,38,0],[20,13,24,21,0],[24,35,25,21,0],[25,42,29,21,0],[29,52,31,15,0],[32,9,32,10,0],[24,21,24,35,0],[25,21,25,42,0],[42,40,42,44,0],[42,45,42,49,0],[45,47,45,51,0],[45,52,45,56,0],[48,46,48,50,0],[48,51,48,55,0],[51,41,51,45,0],[51,46,51,50,0],[54,39,54,43,0],[54,44,54,48,0],[57,45,57,49,0],[57,50,57,54,0],[60,41,60,45,0],[60,46,60,50,0],[63,39,63,43,0],[63,44,63,48,0],[66,35,66,39,0],[66,40,66,44,0],[69,35,69,39,0],[69,40,69,44,0],[72,35,72,39,0],[72,40,72,44,0],[75,37,75,41,0],[75,42,75,46,0],[78,43,78,47,0],[78,48,78,52,0],[81,40,81,44,0],[81,45,81,49,0],[84,41,84,45,0],[84,46,84,50,0],[87,41,87,45,0],[87,46,87,50,0],[95,31,95,35,0],[95,36,95,40,0],[98,29,98,33,0],[98,34,98,38,0],[101,29,101,33,0],[101,34,101,38,0],[104,32,104,36,0],[104,37,104,41,0],[107,38,107,42,0],[107,43,107,47,0],[110,32,110,36,0],[110,37,110,41,0],[113,30,113,34,0],[113,35,113,39,0],[123,39,123,43,0],[123,44,123,48,0],[132,38,132,42,0],[132,43,132,47,0],[135,37,135,41,0],[135,42,135,46,0],[138,37,138,41,0],[138,42,138,46,0],[141,41,141,45,0],[141,46,141,50,0],[145,39,145,43,0],[145,44,145,48,0],[151,35,151,39,0],[151,40,151,44,0],[154,37,154,41,0],[154,42,154,46,0],[157,37,157,41,0],[157,42,157,46,0],[160,41,160,45,0],[160,46,160,50,0],[163,35,163,39,0],[163,40,163,44,0],[167,39,167,43,0],[167,44,167,48,0],[177,33,177,37,0],[177,38,177,42,0],[195,35,195,39,0],[195,40,195,44,0],[202,30,202,34,0],[202,35,202,39,0],[205,34,205,38,0],[205,39,205,43,0],[208,36,208,40,0],[208,41,208,45,0],[214,29,214,33,0],[214,34,214,38,0],[217,39,217,43,0],[217,44,217,48,0],[223,33,223,37,0],[223,38,223,42,0],[233,37,233,41,0],[233,42,233,46,0],[29,21,29,52,0]]);
+    </script>
+  </body>
+</html>

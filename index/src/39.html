@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\aboutdialog.designer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Windows.Forms;
+
+namespace CKAN
+{
+    partial class AboutDialog
+    {
+        /// &lt;summary&gt;
+        /// Required designer variable.
+        /// &lt;/summary&gt;
+        private System.ComponentModel.IContainer components = null;
+
+        /// &lt;summary&gt;
+        /// Clean up any resources being used.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;disposing&quot;&gt;true if managed resources should be disposed; otherwise, false.&lt;/param&gt;
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing &amp;&amp; (components != null))
+            {
+                components.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        #region Windows Form Designer generated code
+
+        /// &lt;summary&gt;
+        /// Required method for Designer support - do not modify
+        /// the contents of this method with the code editor.
+        /// &lt;/summary&gt;
+        private void InitializeComponent()
+        {
+            this.label1 = new System.Windows.Forms.Label();
+            this.linkLabel1 = new System.Windows.Forms.LinkLabel();
+            this.linkLabel2 = new System.Windows.Forms.LinkLabel();
+            this.linkLabel3 = new System.Windows.Forms.LinkLabel();
+            this.linkLabel4 = new System.Windows.Forms.LinkLabel();
+            this.label2 = new System.Windows.Forms.Label();
+            this.linkLabel5 = new System.Windows.Forms.LinkLabel();
+            this.SuspendLayout();
+            // 
+            // label1
+            // 
+            this.label1.Anchor = System.Windows.Forms.AnchorStyles.Top;
+            this.label1.Font = new System.Drawing.Font(&quot;Microsoft Sans Serif&quot;, 8.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.label1.Location = new System.Drawing.Point(12, 9);
+            this.label1.Name = &quot;label1&quot;;
+            this.label1.Size = new System.Drawing.Size(317, 20);
+            this.label1.TabIndex = 0;
+            this.label1.Text = &quot;CKAN - The Comprehensive Kerbal Archive Network&quot;;
+            this.label1.TextAlign = System.Drawing.ContentAlignment.TopCenter;
+            // 
+            // linkLabel1
+            // 
+            this.linkLabel1.AutoSize = true;
+            this.linkLabel1.LinkArea = new System.Windows.Forms.LinkArea(0, 8);
+            this.linkLabel1.Location = new System.Drawing.Point(140, 29);
+            this.linkLabel1.Name = &quot;linkLabel1&quot;;
+            this.linkLabel1.Size = new System.Drawing.Size(43, 17);
+            this.linkLabel1.TabIndex = 1;
+            this.linkLabel1.TabStop = true;
+            this.linkLabel1.Text = &quot;License&quot;;
+            this.linkLabel1.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.linkLabel1.UseCompatibleTextRendering = true;
+            this.linkLabel1.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.linkLabel1_LinkClicked);
+            // 
+            // linkLabel2
+            // 
+            this.linkLabel2.AutoSize = true;
+            this.linkLabel2.LinkArea = new System.Windows.Forms.LinkArea(0, 7);
+            this.linkLabel2.Location = new System.Drawing.Point(141, 56);
+            this.linkLabel2.Name = &quot;linkLabel2&quot;;
+            this.linkLabel2.Size = new System.Drawing.Size(43, 13);
+            this.linkLabel2.TabIndex = 2;
+            this.linkLabel2.TabStop = true;
+            this.linkLabel2.Text = &quot;Authors&quot;;
+            this.linkLabel2.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.linkLabel2.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.linkLabel2_LinkClicked);
+            // 
+            // linkLabel3
+            // 
+            this.linkLabel3.AutoSize = true;
+            this.linkLabel3.LinkArea = new System.Windows.Forms.LinkArea(0, 6);
+            this.linkLabel3.Location = new System.Drawing.Point(52, 84);
+            this.linkLabel3.Name = &quot;linkLabel3&quot;;
+            this.linkLabel3.Size = new System.Drawing.Size(41, 13);
+            this.linkLabel3.TabIndex = 3;
+            this.linkLabel3.TabStop = true;
+            this.linkLabel3.Text = &quot;Source&quot;;
+            this.linkLabel3.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.linkLabel3_LinkClicked);
+            // 
+            // linkLabel4
+            // 
+            this.linkLabel4.AutoSize = true;
+            this.linkLabel4.LinkArea = new System.Windows.Forms.LinkArea(0, 12);
+            this.linkLabel4.Location = new System.Drawing.Point(213, 84);
+            this.linkLabel4.Name = &quot;linkLabel4&quot;;
+            this.linkLabel4.Size = new System.Drawing.Size(73, 13);
+            this.linkLabel4.TabIndex = 4;
+            this.linkLabel4.TabStop = true;
+            this.linkLabel4.Text = &quot;Forum Thread&quot;;
+            this.linkLabel4.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.linkLabel4_LinkClicked);
+            // 
+            // label2
+            // 
+            this.label2.Location = new System.Drawing.Point(79, 106);
+            this.label2.Name = &quot;label2&quot;;
+            this.label2.Size = new System.Drawing.Size(184, 18);
+            this.label2.TabIndex = 5;
+            this.label2.Text = &quot;Version &quot; + Meta.Version();
+            this.label2.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            // 
+            // linkLabel5
+            // 
+            this.linkLabel5.LinkArea = new System.Windows.Forms.LinkArea(0, 15);
+            this.linkLabel5.Location = new System.Drawing.Point(125, 84);
+            this.linkLabel5.Name = &quot;linkLabel5&quot;;
+            this.linkLabel5.Size = new System.Drawing.Size(71, 13);
+            this.linkLabel5.TabIndex = 6;
+            this.linkLabel5.TabStop = true;
+            this.linkLabel5.Text = &quot;Homepage&quot;;
+            this.linkLabel5.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.linkLabel5.UseCompatibleTextRendering = true;
+            this.linkLabel5.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.linkLabel5_LinkClicked);
+            // 
+            // AboutDialog
+            // 
+            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.ClientSize = new System.Drawing.Size(341, 133);
+            this.Controls.Add(this.linkLabel5);
+            this.Controls.Add(this.label2);
+            this.Controls.Add(this.linkLabel4);
+            this.Controls.Add(this.linkLabel3);
+            this.Controls.Add(this.linkLabel2);
+            this.Controls.Add(this.linkLabel1);
+            this.Controls.Add(this.label1);
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.Name = &quot;AboutDialog&quot;;
+            this.Text = &quot;About&quot;;
+            this.ResumeLayout(false);
+            this.PerformLayout();
+
+        }
+
+        #endregion
+
+        private System.Windows.Forms.Label label1;
+        private System.Windows.Forms.LinkLabel linkLabel1;
+        private System.Windows.Forms.LinkLabel linkLabel2;
+        private System.Windows.Forms.LinkLabel linkLabel3;
+        private System.Windows.Forms.LinkLabel linkLabel4;
+        private System.Windows.Forms.Label label2;
+        private LinkLabel linkLabel5;
+
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[11,9,11,68,0],[18,9,18,10,0],[19,13,19,51,0],[20,13,20,14,0],[21,17,21,38,0],[22,13,22,14,0],[23,13,23,37,0],[24,9,24,10,0],[33,9,33,10,0],[34,13,34,60,0],[35,13,35,68,0],[36,13,36,68,0],[37,13,37,68,0],[38,13,38,68,0],[39,13,39,60,0],[40,13,40,68,0],[41,13,41,34,0],[45,13,45,72,0],[46,13,46,166,0],[47,13,47,68,0],[48,13,48,41,0],[49,13,49,65,0],[50,13,50,38,0],[51,13,51,82,0],[52,13,52,79,0],[56,13,56,45,0],[57,13,57,80,0],[58,13,58,74,0],[59,13,59,49,0],[60,13,60,68,0],[61,13,61,42,0],[62,13,62,44,0],[63,13,63,46,0],[64,13,64,86,0],[65,13,65,63,0],[66,13,66,131,0],[70,13,70,45,0],[71,13,71,80,0],[72,13,72,74,0],[73,13,73,49,0],[74,13,74,68,0],[75,13,75,42,0],[76,13,76,44,0],[77,13,77,46,0],[78,13,78,86,0],[79,13,79,131,0],[83,13,83,45,0],[84,13,84,80,0],[85,13,85,73,0],[86,13,86,49,0],[87,13,87,68,0],[88,13,88,42,0],[89,13,89,44,0],[90,13,90,45,0],[91,13,91,131,0],[95,13,95,45,0],[96,13,96,81,0],[97,13,97,74,0],[98,13,98,49,0],[99,13,99,68,0],[100,13,100,42,0],[101,13,101,44,0],[102,13,102,51,0],[103,13,103,131,0],[107,13,107,70,0],[108,13,108,41,0],[109,13,109,65,0],[110,13,110,38,0],[111,13,111,60,0],[112,13,112,82,0],[116,13,116,81,0],[117,13,117,74,0],[118,13,118,49,0],[119,13,119,68,0],[120,13,120,42,0],[121,13,121,44,0],[122,13,122,47,0],[123,13,123,86,0],[124,13,124,63,0],[125,13,125,131,0],[129,13,129,74,0],[130,13,130,74,0],[131,13,131,65,0],[132,13,132,48,0],[133,13,133,44,0],[134,13,134,48,0],[135,13,135,48,0],[136,13,136,48,0],[137,13,137,48,0],[138,13,138,44,0],[139,13,139,85,0],[140,13,140,38,0],[141,13,141,38,0],[142,13,142,39,0],[143,13,143,33,0],[144,13,144,38,0],[145,13,145,34,0],[147,9,147,10,0]]);
+    </script>
+  </body>
+</html>

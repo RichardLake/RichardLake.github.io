@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\ksppathutils.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.IO;
+using System.Text.RegularExpressions;
+using log4net;
+
+namespace CKAN
+{
+    public class KSPPathUtils
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof(KSPPathUtils));
+
+        /// &lt;summary&gt;
+        ///     Finds Steam on the current machine.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The path to steam, or null if not found&lt;/returns&gt;
+        public static string SteamPath()
+        {
+            // First check the registry.
+
+            const string reg_key = @&quot;HKEY_CURRENT_USER\Software\Valve\Steam&quot;;
+            const string reg_value = @&quot;SteamPath&quot;;
+
+            log.DebugFormat(&quot;Checking {0}\\{1} for Steam path&quot;, reg_key, reg_value);
+
+            var steam = (string)Microsoft.Win32.Registry.GetValue(reg_key, reg_value, null);
+
+            // If that directory exists, we&#39;ve found steam!
+            if (steam != null &amp;&amp; Directory.Exists(steam))
+            {
+                log.InfoFormat(&quot;Found Steam at {0}&quot;, steam);
+                return steam;
+            }
+
+            log.Debug(&quot;Couldn&#39;t find Steam via registry key, trying other locations...&quot;);
+
+            // Not in the registry, or missing file, but that&#39;s cool. This should find it on Linux
+
+            steam = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Personal),
+                &quot;.steam&quot;, &quot;steam&quot;
+                );
+
+            log.DebugFormat(&quot;Looking for Steam in {0}&quot;, steam);
+
+            if (Directory.Exists(steam))
+            {
+                log.InfoFormat(&quot;Found Steam at {0}&quot;, steam);
+                return steam;
+            }
+
+            // Ok - Perhaps we&#39;re running OSX?
+
+            steam = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Personal),
+                Path.Combine(&quot;Library&quot;, &quot;Application Support&quot;, &quot;Steam&quot;)
+                );
+
+            log.DebugFormat(&quot;Looking for Steam in {0}&quot;, steam);
+
+            if (Directory.Exists(steam))
+            {
+                log.InfoFormat(&quot;Found Steam at {0}&quot;, steam);
+                return steam;
+            }
+
+            log.Info(&quot;Steam not found on this system.&quot;);
+            return null;
+        }
+
+        /// &lt;summary&gt;
+        /// Normalizes the path by replace any \ with / and removing any trailing slash.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The normalized path.&lt;/returns&gt;
+        /// &lt;param name=&quot;path&quot;&gt;The path to normalize.&lt;/param&gt;
+        public static string NormalizePath(string path)
+        {
+            return path.Replace(&#39;\\&#39;, &#39;/&#39;).TrimEnd(&#39;/&#39;);
+        }
+
+        /// &lt;summary&gt;
+        /// Gets the last path element. Ex: /a/b/c returns c
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The last path element.&lt;/returns&gt;
+        /// &lt;param name=&quot;path&quot;&gt;The path to process.&lt;/param&gt;
+        public static string GetLastPathElement(string path)
+        {
+            return Regex.Replace(NormalizePath(path), @&quot;^.*/&quot;, &quot;&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Gets the leading path elements. Ex: /a/b/c returns /a/b
+        /// 
+        /// Returns empty string if there is no leading path. (Eg: &quot;Example.dll&quot; -&gt; &quot;&quot;);
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The leading path elements.&lt;/returns&gt;
+        /// &lt;param name=&quot;path&quot;&gt;The path to process.&lt;/param&gt;
+        public static string GetLeadingPathElements(string path)
+        {
+            path = NormalizePath(path);
+
+            if (Regex.IsMatch(path, &quot;/&quot;))
+            {
+                return Regex.Replace(path, @&quot;(^.*)/.+&quot;, &quot;$1&quot;);
+            }
+            return String.Empty;
+        }
+
+        /// &lt;summary&gt;
+        /// Converts a path to one relative to the root provided.
+        /// Please use KSP.ToRelative when working with gamedirs.
+        /// Throws a PathErrorKraken if the path is not absolute, not inside the root,
+        /// or either argument is null.
+        /// &lt;/summary&gt;
+        public static string ToRelative(string path, string root)
+        {
+            if (path == null || root == null)
+            {
+                throw new PathErrorKraken(null, &quot;Null path provided&quot;);
+            }
+
+            // We have to normalise before we check for rootedness,
+            // otherwise backslash separators fail on Linux.
+
+            path = NormalizePath(path);
+            root = NormalizePath(root);
+
+            if (!Path.IsPathRooted(path))
+            {
+                throw new PathErrorKraken(
+                    path,
+                    String.Format(&quot;{0} is not an absolute path&quot;, path)
+                );
+            }
+
+            if (! path.StartsWith(root))
+            {
+                throw new PathErrorKraken(
+                    path,
+                    String.Format(
+                        &quot;Oh snap. {0} isn&#39;t inside {1}&quot;,
+                        path, root
+                    )
+                );
+            }
+        
+            // The +1 here is because root will never have
+            // a trailing slash.
+            return path.Remove(0, root.Length + 1);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns root/path, but checks that root is absolute,
+        /// path is relative, and normalises everything for great justice.
+        /// Please use KSP.ToAbsolute if converting from a KSP gamedir.
+        /// Throws a PathErrorKraken if anything goes wrong.
+        /// &lt;/summary&gt;
+        public static string ToAbsolute(string path, string root)
+        {
+            if (path == null || root == null)
+            {
+                throw new PathErrorKraken(null, &quot;Null path provided&quot;);
+            }
+
+            path = NormalizePath(path);
+            root = NormalizePath(root);
+
+            if (Path.IsPathRooted(path))
+            {
+                throw new PathErrorKraken(
+                    path,
+                    String.Format(&quot;{0} is already absolute&quot;, path)
+                );
+            }
+
+            if (!Path.IsPathRooted(root))
+            {
+                throw new PathErrorKraken(
+                    root,
+                    String.Format(&quot;{0} isn&#39;t an absolute root&quot;, root)
+                );
+            }
+
+            // Why normalise it AGAIN? Because Path.Combine can insert
+            // the un-prettiest slashes.
+            return NormalizePath(Path.Combine(root, path));
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[17,9,17,10,0],[23,13,23,85,0],[25,13,25,93,0],[28,13,28,58,0],[29,13,29,14,0],[30,17,30,61,0],[31,17,31,30,0],[34,13,34,90,0],[38,13,41,19,0],[43,13,43,64,0],[45,13,45,41,0],[46,13,46,14,0],[47,17,47,61,0],[48,17,48,30,0],[53,13,56,19,0],[58,13,58,64,0],[60,13,60,41,0],[61,13,61,14,0],[62,17,62,61,0],[63,17,63,30,0],[66,13,66,57,0],[67,13,67,25,0],[68,9,68,10,0],[86,9,86,10,0],[87,13,87,68,0],[88,9,88,10,0],[117,13,117,14,0],[118,17,118,71,0],[128,13,128,14,0],[129,17,132,19,0],[136,13,136,14,0],[137,17,143,19,0],[160,13,160,14,0],[161,17,161,71,0],[168,13,168,14,0],[169,17,172,19,0],[176,13,176,14,0],[177,17,180,19,0],[76,9,76,10,1],[77,13,77,57,1],[78,9,78,10,1],[98,9,98,10,1],[99,13,99,40,1],[101,13,101,42,1],[102,13,102,14,1],[103,17,103,63,1],[105,13,105,33,1],[106,9,106,10,1],[115,9,115,10,1],[116,13,116,46,1],[124,13,124,40,1],[125,13,125,40,1],[127,13,127,42,1],[135,13,135,41,1],[148,13,148,52,1],[149,9,149,10,1],[158,9,158,10,1],[159,13,159,46,1],[164,13,164,40,1],[165,13,165,40,1],[167,13,167,41,1],[175,13,175,42,1],[185,13,185,60,1],[186,9,186,10,1],[10,9,10,87,1]]);
+    </script>
+  </body>
+</html>

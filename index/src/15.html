@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\types\kraken.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Collections.Generic;
+
+namespace CKAN
+{
+    /// &lt;summary&gt;
+    /// Our application exceptions are called Krakens.
+    /// &lt;/summary&gt;
+    public class Kraken : Exception
+    {
+        public Kraken(string reason = null, Exception inner_exception = null) : base(reason, inner_exception)
+        {
+        }
+    }
+
+    public class FileNotFoundKraken : Kraken
+    {
+        public string file;
+
+        public FileNotFoundKraken(string file, string reason = null, Exception inner_exception = null) 
+            :base(reason, inner_exception)
+        {
+            this.file = file;
+        }
+    }
+
+    public class DirectoryNotFoundKraken : Kraken
+    {
+        public string directory;
+
+        public DirectoryNotFoundKraken(string directory, string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+            this.directory = directory;
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// A bad install location was provided.
+    /// Valid locations are GameData, GameRoot, Ships, etc.
+    /// &lt;/summary&gt;
+    public class BadInstallLocationKraken : Kraken
+    {
+        // Okay C#, you really need a keyword in your class declaration that says we call our
+        // parent constructors by default. This sort of thing is unacceptable in a modern
+        // programming langauge.
+
+        public BadInstallLocationKraken(string reason = null, Exception inner_exception = null) : base(reason, inner_exception)
+        {
+        }
+    }
+
+    public class ModuleNotFoundKraken : Kraken
+    {
+        public string module;
+        public string version;
+
+        // TODO: Is there a way to set the stringify version of this?
+        public ModuleNotFoundKraken(string module, string version = null, string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+            this.module = module;
+            this.version = version;
+        }
+    }
+
+    public class NotKSPDirKraken : Kraken
+    {
+        public string path;
+
+        public NotKSPDirKraken(string path, string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+            this.path = path;
+        }
+    }
+
+    public class TransactionalKraken : Kraken
+    {
+        public TransactionalKraken(string reason = null, Exception inner_exception = null)
+            :base(reason,inner_exception)
+        {
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// We had bad metadata that resulted in an invalid operation occuring.
+    /// For example: a file install stanza that produces no files.
+    /// &lt;/summary&gt;
+    public class BadMetadataKraken : Kraken
+    {
+        public CkanModule module;
+
+        public BadMetadataKraken(CkanModule module, string reason = null, Exception inner_exception = null)
+            :base(reason,inner_exception)
+        {
+            this.module = module;
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// Thrown if we try to load an incompatible CKAN registry.
+    /// &lt;/summary&gt;
+    public class RegistryVersionNotSupportedKraken : Kraken
+    {
+        public int requested_version;
+
+        public RegistryVersionNotSupportedKraken(int v, string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+            requested_version = v;
+        }
+    }
+
+    public class TooManyModsProvideKraken : Kraken
+    {
+        public List&lt;CkanModule&gt; modules;
+        public string requested;
+
+        public TooManyModsProvideKraken(string requested, List&lt;CkanModule&gt; modules, Exception inner_exception = null)
+            :base(FormatMessage(requested, modules), inner_exception)
+        {
+            this.modules = modules;
+            this.requested = requested;
+        }
+
+        internal static string FormatMessage(string requested, List&lt;CkanModule&gt; modules)
+        {
+            string oops = string.Format(&quot;Too many mods provide {0}:\n&quot;, requested);
+            return oops + String.Join(&quot;\n* &quot;, modules);
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// Thrown if we find ourselves in an inconsistent state, such as when we have multiple modules
+    /// installed which conflict with each other.
+    /// &lt;/summary&gt;
+    public class InconsistentKraken : Kraken
+    {
+        public ICollection&lt;string&gt; inconsistencies;
+
+        public string InconsistenciesPretty
+        {
+            get
+            {
+                const string message = &quot;The following inconsistencies were found:\n&quot;;
+                return message + String.Join(&quot;\n * &quot;, inconsistencies);
+            }
+        }
+
+        public InconsistentKraken(ICollection&lt;string&gt; inconsistencies, Exception inner_exception = null)
+            :base(null, inner_exception)
+        {
+            this.inconsistencies = inconsistencies;
+        }
+
+        public InconsistentKraken(string inconsistency, Exception inner_exception = null)
+            :base(null, inner_exception)
+        {
+            inconsistencies = new List&lt;string&gt; { inconsistency };
+        }
+
+        public override string ToString()
+        {
+            return InconsistenciesPretty + StackTrace;
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// The terrible state when a file exists when we expect it not to be there.
+    /// For example, when we install a mod, and it tries to overwrite a file from another mod.
+    /// &lt;/summary&gt;
+    public class FileExistsKraken : Kraken
+    {
+        public string filename;
+
+        // These aren&#39;t set at construction time, but exist so that we can decorate the
+        // kraken as appropriate.
+        public CkanModule installing_module;
+        public string owning_module;
+
+        public FileExistsKraken(string filename, string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+            this.filename = filename;
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// The terrible state when errors occurred during downloading.
+    /// Requires an IEnumerable list of exceptions on construction.
+    /// Has a specialised ToString() that shows everything that went wrong.
+    /// &lt;/summary&gt;
+    public class DownloadErrorsKraken : Kraken
+    {
+        public List&lt;Exception&gt; exceptions;
+
+        public DownloadErrorsKraken(IEnumerable&lt;Exception&gt; errors, string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+            exceptions = new List&lt;Exception&gt; (errors);
+        }
+
+        public override string ToString()
+        {
+            return &quot;Uh oh, the following things went wrong when downloading...\n\n&quot; + String.Join(&quot;\n&quot;, exceptions);
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// The terrible kraken summoned forth to indicate a user cancelled whatever
+    /// we were doing.
+    /// &lt;/summary&gt;
+    public class CancelledActionKraken : Kraken
+    {
+        public CancelledActionKraken(string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// The terrible kraken that awakens from the deep when we don&#39;t support something,
+    /// like a metadata spec from the future.
+    /// &lt;/summary&gt;
+    public class UnsupportedKraken : Kraken
+    {
+        public UnsupportedKraken(string reason, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// The mighty kraken that emerges from the depth when we have a problem with a path,
+    /// such as when it cannot be converted from absolute to relative, or vice-versa.
+    /// &lt;/summary&gt;
+    public class PathErrorKraken : Kraken
+    {
+        public string path;
+
+        public PathErrorKraken(string path, string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+            this.path = path;
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// Tremble, mortal, for ye has summoned the kraken of mods which are not installed.
+    /// Thou hast tried to remove or perform actions upon a mod that is not there!
+    /// This kraken provides a custom Message
+    /// &lt;/summary&gt;
+    public class ModNotInstalledKraken : Kraken
+    {
+        public string mod;
+
+        public override string Message
+        {
+            get { return string.Format(&quot;Module {0} is not installed!&quot;, mod); }
+        }
+
+        // TODO: Since we override message, should we really allow users to pass in a reason
+        // here? Is there a way we can check if that was set, and then access it directly from
+        // our base class?
+
+        public ModNotInstalledKraken(string mod, string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+            this.mod = mod;
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// A bad command; useful for things like command-line handling, or REST servers.
+    /// &lt;/summary&gt;
+    public class BadCommandKraken : Kraken
+    {
+        public BadCommandKraken(string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+        }
+    }
+
+    public class MissingCertificateKraken : Kraken
+    {
+        public MissingCertificateKraken(string reason = null, Exception inner_exception = null)
+            :base(reason, inner_exception)
+        {
+        }
+
+        public override string ToString()
+        {
+            return
+                &quot;\nOh no! Our download failed with a certificate error!\n\n&quot; +
+                &quot;If you&#39;re on Linux, try running:\n&quot; +
+                &quot;\tmozroots --import --ask-remove\n&quot; +
+                &quot;on the command-line to update your certificate store, and try again.\n\n&quot;
+            ;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[72,14,72,43,0],[73,9,73,10,0],[74,13,74,30,0],[75,9,75,10,0],[109,14,109,43,0],[110,9,110,10,0],[111,13,111,35,0],[112,9,112,10,0],[145,13,145,14,0],[147,17,147,72,0],[148,13,148,14,0],[152,14,152,41,0],[153,9,153,10,0],[154,13,154,52,0],[155,9,155,10,0],[164,9,164,10,0],[165,13,165,55,0],[166,9,166,10,0],[199,14,199,43,0],[200,9,200,10,0],[201,13,201,55,0],[202,9,202,10,0],[205,9,205,10,0],[206,13,206,117,0],[207,9,207,10,0],[217,14,217,43,0],[218,9,218,10,0],[219,9,219,10,0],[229,14,229,43,0],[230,9,230,10,0],[231,9,231,10,0],[243,14,243,43,0],[244,9,244,10,0],[245,13,245,30,0],[246,9,246,10,0],[260,17,260,18,0],[260,19,260,77,0],[260,78,260,79,0],[280,14,280,43,0],[281,9,281,10,0],[282,9,282,10,0],[288,14,288,43,0],[289,9,289,10,0],[290,9,290,10,0],[293,9,293,10,0],[294,13,299,14,0],[300,9,300,10,0],[11,81,11,110,1],[12,9,12,10,1],[13,9,13,10,1],[21,14,21,43,1],[22,9,22,10,1],[23,13,23,30,1],[24,9,24,10,1],[32,14,32,43,1],[33,9,33,10,1],[34,13,34,40,1],[35,9,35,10,1],[48,99,48,128,1],[49,9,49,10,1],[50,9,50,10,1],[60,14,60,43,1],[61,9,61,10,1],[62,13,62,34,1],[63,13,63,36,1],[64,9,64,10,1],[81,14,81,42,1],[82,9,82,10,1],[83,9,83,10,1],[95,14,95,42,1],[96,9,96,10,1],[97,13,97,34,1],[98,9,98,10,1],[121,14,121,70,1],[122,9,122,10,1],[123,13,123,36,1],[124,13,124,40,1],[125,9,125,10,1],[128,9,128,10,1],[129,13,129,84,1],[130,13,130,56,1],[131,9,131,10,1],[158,14,158,41,1],[159,9,159,10,1],[160,13,160,66,1],[161,9,161,10,1],[183,14,183,43,1],[184,9,184,10,1],[185,13,185,38,1],[186,9,186,10,1],[268,14,268,43,1],[269,9,269,10,1],[270,13,270,28,1],[271,9,271,10,1]]);
+    </script>
+  </body>
+</html>

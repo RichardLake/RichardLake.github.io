@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\tests\ckan\types\module.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using CKAN;
+using NUnit.Framework;
+using Tests;
+
+namespace CKANTests
+{
+    [TestFixture]
+    public class Module
+    {
+        [Test]
+        public void CompatibleWith()
+        {
+            CkanModule module = CkanModule.FromJson(TestData.kOS_014());
+
+            Assert.IsTrue(module.IsCompatibleKSP(&quot;0.24.2&quot;));
+        }
+
+        [Test]
+        public void StandardName()
+        {
+            CkanModule module = CkanModule.FromJson(TestData.kOS_014());
+
+            Assert.AreEqual(module.StandardName(), &quot;kOS-0.14.zip&quot;);
+        }
+
+        [Test]
+        public void MetaData()
+        {
+            CkanModule module = CkanModule.FromJson (TestData.kOS_014 ());
+
+            // TODO: Test all the metadata here!
+            Assert.AreEqual(&quot;https://github.com/KSP-KOS/KOS/issues&quot;, module.resources.bugtracker.ToString());
+        }
+
+        /// &lt;summary&gt;
+        /// There&#39;s a condition where some mods won&#39;t download if the server is presented with
+        /// an unescaped string, but *will* if passed an escaped string. This isn&#39;t the case with
+        /// all servers and mods, but in any case we check that our original string is always
+        /// available after Url-ification so we can use it.
+        /// &lt;/summary&gt;
+        [Test]
+        public void SpacesPreservedInDownload()
+        {
+            CkanModule module = CkanModule.FromJson(TestData.DogeCoinFlag_101());
+            Assert.AreEqual(&quot;https://kerbalstuff.com/mod/269/Dogecoin%20Flag/download/1.01&quot;, module.download.OriginalString);
+        }
+
+        [Test]
+        public void FilterRead()
+        {
+            CkanModule module = CkanModule.FromJson(TestData.DogeCoinFlag_101());
+
+            // Assert known things about this mod.
+            Assert.IsNotNull(module.install[0].filter);
+            Assert.IsNotNull(module.install[0].filter_regexp);
+
+            Assert.AreEqual(2, module.install[0].filter.Count);
+        }
+
+        [Test]
+        public void SpecCompareAssumptions()
+        {
+            // These are checks to make sure our assumptions regarding
+            // spec versions hold.
+
+            // The *old* CKAN spec had a version number of &quot;1&quot;.
+            // It should be accepted by any client with an old version number,
+            // as well as any with a new version number.
+            var old_spec = new CKAN.Version(&quot;1&quot;);
+            var old_dev = new CKAN.Version(&quot;v0.23&quot;);
+            var new_dev = new CKAN.Version(&quot;v1.2.3&quot;);
+
+            Assert.IsTrue(old_dev.IsGreaterThan(old_spec));
+            Assert.IsTrue(new_dev.IsGreaterThan(old_spec));
+
+            // The new spec requires a minimum number (v1.2, v1.4)
+            // Make sure our assumptions here hold, too.
+
+            var readable_spec = new CKAN.Version(&quot;v1.2&quot;);
+            var unreadable_spec = new CKAN.Version(&quot;v1.4&quot;);
+
+            Assert.IsTrue(new_dev.IsGreaterThan(readable_spec));
+            Assert.IsFalse(new_dev.IsGreaterThan(unreadable_spec));
+        }
+
+        [Test]
+        public void IsSpecSupported()
+        {
+            if (CKAN.Meta.ReleaseNumber() == null)
+            {
+                Assert.Inconclusive(&quot;Dev build&quot;);
+            }
+
+            // We should always support old versions, and the classic &#39;1&#39; version.
+            Assert.IsTrue(CkanModule.IsSpecSupported(new CKAN.Version(&quot;1&quot;)));
+            Assert.IsTrue(CkanModule.IsSpecSupported(new CKAN.Version(&quot;v0.02&quot;)));
+
+            // We shouldn&#39;t support this far-in-the-future version.
+            // NB: V2K bug!!!
+            Assert.IsFalse(CkanModule.IsSpecSupported(new CKAN.Version(&quot;v2000.99.99&quot;)));
+        }
+
+        [Test]
+        public void DottedSpecsSupported()
+        {
+            // We should support both two and three number dotted specs, on both
+            // tagged and dev releases.
+
+            Assert.IsTrue(CkanModule.IsSpecSupported(new CKAN.Version(&quot;v1.1&quot;)));
+            Assert.IsTrue(CkanModule.IsSpecSupported(new CKAN.Version(&quot;v1.0.2&quot;)));
+        }
+
+        [Test]
+        public void FutureModule()
+        {
+            if (CKAN.Meta.ReleaseNumber() == null)
+            {
+                Assert.Inconclusive(&quot;Dev build&quot;);
+            }
+
+            // Modules form the future are unsupported.
+
+            Assert.Throws&lt;UnsupportedKraken&gt;(delegate
+            {
+                CkanModule.FromJson(TestData.FutureMetaData());
+            });
+
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[92,13,92,14,0],[95,13,95,78,0],[96,13,96,82,0],[100,13,100,89,0],[101,9,101,10,0],[119,13,119,14,0],[123,13,124,13,0],[124,14,125,17,0],[125,64,126,13,0],[126,14,126,16,0],[128,9,128,10,0],[124,13,124,14,0],[125,17,125,64,0],[126,13,126,14,0],[12,9,12,10,1],[13,13,13,73,1],[15,13,15,61,1],[16,9,16,10,1],[20,9,20,10,1],[21,13,21,73,1],[23,13,23,68,1],[24,9,24,10,1],[28,9,28,10,1],[29,13,29,75,1],[32,13,32,110,1],[33,9,33,10,1],[43,9,43,10,1],[44,13,44,82,1],[45,13,45,126,1],[46,9,46,10,1],[50,9,50,10,1],[51,13,51,82,1],[54,13,54,56,1],[55,13,55,63,1],[57,13,57,64,1],[58,9,58,10,1],[62,9,62,10,1],[69,13,69,50,1],[70,13,70,53,1],[71,13,71,54,1],[73,13,73,60,1],[74,13,74,60,1],[79,13,79,58,1],[80,13,80,60,1],[82,13,82,65,1],[83,13,83,68,1],[84,9,84,10,1],[88,9,88,10,1],[89,13,89,51,1],[90,13,90,14,1],[91,17,91,50,1],[105,9,105,10,1],[109,13,109,81,1],[110,13,110,83,1],[111,9,111,10,1],[115,9,115,10,1],[116,13,116,51,1],[117,13,117,14,1],[118,17,118,50,1]]);
+    </script>
+  </body>
+</html>

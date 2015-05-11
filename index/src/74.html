@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\util.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+
+
+namespace CKAN
+{
+    using System.Runtime.InteropServices;
+    using System.Windows.Forms;
+
+    public static class Util
+    {                
+        /// &lt;summary&gt;
+        /// Invokes an action on the UI thread, or directly if we&#39;re
+        /// on the UI thread.
+        /// &lt;/summary&gt;
+        public static void Invoke&lt;T&gt;(T obj, Action action) where T : Control
+        {
+            if (obj.InvokeRequired) // if we&#39;re not in the UI thread
+            {
+                // enqueue call on UI thread and wait for it to return
+                obj.Invoke(new MethodInvoker(action));
+            }
+            else
+            {
+                // we&#39;re on the UI thread, execute directly
+                action();
+            }
+        }
+
+        // utility helper to deal with multi-threading and UI
+        // async version, doesn&#39;t wait for UI thread
+        // use with caution, when not sure use blocking Invoke()
+        public static void AsyncInvoke&lt;T&gt;(T obj, Action action) where T : Control
+        {
+            if (obj.InvokeRequired) // if we&#39;re not in the UI thread
+            {
+                // enqueue call on UI thread and continue
+                obj.BeginInvoke(new MethodInvoker(action));
+            }
+            else
+            {
+                // we&#39;re on the UI thread, execute directly
+                action();
+            }
+        }
+
+        // hides the console window on windows
+        // useful when running the GUI
+        [DllImport(&quot;kernel32.dll&quot;)]
+        static extern IntPtr GetConsoleWindow();
+
+        [DllImport(&quot;user32.dll&quot;)]
+        static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        public static void HideConsoleWindow()
+        {
+            if (Platform.IsWindows)
+            {
+                ShowWindow(GetConsoleWindow(), 0);
+            }
+        }
+   }
+}
+
+namespace CKAN
+{
+    public static class UtilWithoutWinForm
+    {
+        public static bool IsInstallable(this GUIMod mod)
+        {
+
+            return !(mod == null || mod.IsAutodetected || mod.IsIncompatible);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[16,9,16,10,0],[17,13,17,36,0],[18,13,18,14,0],[20,17,20,55,0],[21,13,21,14,0],[23,13,23,14,0],[25,17,25,26,0],[26,13,26,14,0],[27,9,27,10,0],[33,9,33,10,0],[34,13,34,36,0],[35,13,35,14,0],[37,17,37,60,0],[38,13,38,14,0],[40,13,40,14,0],[42,17,42,26,0],[43,13,43,14,0],[44,9,44,10,0],[55,9,55,10,0],[56,13,56,36,0],[57,13,57,14,0],[58,17,58,51,0],[59,13,59,14,0],[60,9,60,10,0],[69,9,69,10,1],[71,13,71,79,1],[72,9,72,10,1]]);
+    </script>
+  </body>
+</html>

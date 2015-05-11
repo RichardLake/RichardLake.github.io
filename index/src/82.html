@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\tests\ckan\types\kspversion.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using NUnit.Framework;
+
+namespace CKANTests
+{
+    [TestFixture]
+    public class KSPVersion
+    {
+        private void BadTarget()
+        {
+            var any = new CKAN.KSPVersion(null);
+            var vshort = new CKAN.KSPVersion(&quot;0.23&quot;);
+
+            // We can&#39;t ask if something targets a non-real (short) version.
+            any.Targets(vshort);
+        }
+
+        [Test]
+        public void MinMax()
+        {
+            var min = new CKAN.KSPVersion(&quot;0.23&quot;);
+            var max = new CKAN.KSPVersion(&quot;0.23&quot;);
+
+            min.ToLongMin();
+            max.ToLongMax();
+
+            Assert.IsTrue(min.Version() == &quot;0.23.0&quot;);
+            Assert.IsTrue(max.Version() == &quot;0.23.99&quot;); // Ugh, magic version number.
+
+            Assert.IsTrue(min &lt; max);
+            Assert.IsTrue(max &gt; min);
+        }
+
+        [Test]
+        public void Strings()
+        {
+            var any = new CKAN.KSPVersion(null);
+            var vshort = new CKAN.KSPVersion(&quot;0.23&quot;);
+            var vlong = new CKAN.KSPVersion(&quot;0.23.5&quot;);
+
+            Assert.AreSame(any.ToString(), null);
+            Assert.AreSame(vshort.ToString(), &quot;0.23&quot;);
+            Assert.AreSame(vlong.ToString(), &quot;0.23.5&quot;);
+        }
+
+        [Test]
+        public void Targets()
+        {
+            var any = new CKAN.KSPVersion(null);
+            var vshort = new CKAN.KSPVersion(&quot;0.23&quot;);
+            var vlong = new CKAN.KSPVersion(&quot;0.23.5&quot;);
+
+            Assert.IsTrue(any.Targets(vlong));
+            Assert.IsTrue(vshort.Targets(vlong));
+            Assert.IsTrue(vlong.Targets(vlong));
+
+            Assert.That(BadTarget, Throws.Exception);
+        }
+
+        [Test]
+        public void Types()
+        {
+            var v1 = new CKAN.KSPVersion(&quot;any&quot;);
+            Assert.IsTrue(v1.IsAny());
+            Assert.IsFalse(v1.IsNotAny());
+
+            var v2 = new CKAN.KSPVersion(null); // Same as &quot;any&quot;
+            Assert.IsTrue(v2.IsAny());
+            Assert.IsFalse(v2.IsNotAny());
+
+            var vshort = new CKAN.KSPVersion(&quot;0.25&quot;);
+            Assert.IsTrue(vshort.IsShortVersion());
+            Assert.IsFalse(vshort.IsLongVersion());
+            Assert.IsFalse(vshort.IsAny());
+
+            var vlong = new CKAN.KSPVersion(&quot;0.25.2&quot;);
+            Assert.IsTrue(vlong.IsLongVersion());
+            Assert.IsFalse(vlong.IsShortVersion());
+            Assert.IsFalse(vlong.IsAny());
+        }
+
+        [Test]
+        public void MissingZeros()
+        {
+            var v1 = new CKAN.KSPVersion(&quot;.23.5&quot;);
+            Assert.IsInstanceOf&lt;CKAN.KSPVersion&gt;(v1);
+            Assert.AreEqual(&quot;0.23.5&quot;, v1.Version());
+
+            var v0_23_5 = new CKAN.KSPVersion(&quot;0.23.5&quot;);
+            Assert.IsTrue(v1.Targets(v0_23_5));
+
+            // For when Squad makes what they think is a full release. ;)
+            var v1_0_0 = new CKAN.KSPVersion(&quot;1.0.0&quot;);
+            Assert.IsTrue(v1_0_0 &gt; v0_23_5);
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[15,9,15,10,0],[9,9,9,10,1],[10,13,10,49,1],[11,13,11,54,1],[14,13,14,33,1],[19,9,19,10,1],[20,13,20,51,1],[21,13,21,51,1],[23,13,23,29,1],[24,13,24,29,1],[26,13,26,54,1],[27,13,27,55,1],[29,13,29,38,1],[30,13,30,38,1],[31,9,31,10,1],[35,9,35,10,1],[36,13,36,49,1],[37,13,37,54,1],[38,13,38,55,1],[40,13,40,50,1],[41,13,41,55,1],[42,13,42,56,1],[43,9,43,10,1],[47,9,47,10,1],[48,13,48,49,1],[49,13,49,54,1],[50,13,50,55,1],[52,13,52,47,1],[53,13,53,50,1],[54,13,54,49,1],[56,13,56,54,1],[57,9,57,10,1],[61,9,61,10,1],[62,13,62,49,1],[63,13,63,39,1],[64,13,64,43,1],[66,13,66,48,1],[67,13,67,39,1],[68,13,68,43,1],[70,13,70,54,1],[71,13,71,52,1],[72,13,72,52,1],[73,13,73,44,1],[75,13,75,55,1],[76,13,76,50,1],[77,13,77,52,1],[78,13,78,43,1],[79,9,79,10,1],[83,9,83,10,1],[84,13,84,51,1],[85,13,85,54,1],[86,13,86,53,1],[88,13,88,57,1],[89,13,89,48,1],[92,13,92,55,1],[93,13,93,45,1],[94,9,94,10,1]]);
+    </script>
+  </body>
+</html>

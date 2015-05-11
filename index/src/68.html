@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\pluginsdialog.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Reflection;
+using System.Windows.Forms;
+
+namespace CKAN
+{
+    public partial class PluginsDialog : Form
+    {
+        public PluginsDialog()
+        {
+            InitializeComponent();
+            StartPosition = FormStartPosition.CenterScreen;
+        }
+
+        private OpenFileDialog m_AddNewPluginDialog = new OpenFileDialog();
+
+        private void PluginsDialog_Load(object sender, EventArgs e)
+        {
+            DeactivateButton.Enabled = false;
+            ReloadPluginButton.Enabled = false;
+            ActivatePluginButton.Enabled = false;
+            UnloadPluginButton.Enabled = false;
+
+            RefreshActivePlugins();
+            RefreshDormantPlugins();
+
+            m_AddNewPluginDialog.Filter = &quot;CKAN Plugins (*.dll)|*.dll&quot;;
+            m_AddNewPluginDialog.Multiselect = false;
+        }
+
+        private void RefreshActivePlugins()
+        {
+            var activePlugins = Main.Instance.m_PluginController.ActivePlugins;
+
+            ActivePluginsListBox.Items.Clear();
+            foreach (var plugin in activePlugins)
+            {
+                ActivePluginsListBox.Items.Add(plugin);
+            }
+        }
+
+        private void RefreshDormantPlugins()
+        {
+            var dormantPlugins = Main.Instance.m_PluginController.DormantPlugins;
+
+            DormantPluginsListBox.Items.Clear();
+            foreach (var plugin in dormantPlugins)
+            {
+                DormantPluginsListBox.Items.Add(plugin);
+            }
+        }
+
+        private void ActivePluginsListBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            bool state = ActivePluginsListBox.SelectedItem != null;
+            DeactivateButton.Enabled = state;
+            ReloadPluginButton.Enabled = state;
+        }
+
+        private void DeactivateButton_Click(object sender, EventArgs e)
+        {
+            if (ActivePluginsListBox.SelectedItem == null)
+            {
+                return;
+            }
+
+            var plugin = (IGUIPlugin) ActivePluginsListBox.SelectedItem;
+            Main.Instance.m_PluginController.DeactivatePlugin(plugin);
+            RefreshActivePlugins();
+            RefreshDormantPlugins();
+        }
+
+        private void ReloadPluginButton_Click(object sender, EventArgs e)
+        {
+            if (ActivePluginsListBox.SelectedItem == null)
+            {
+                return;
+            }
+
+            var plugin = (IGUIPlugin)ActivePluginsListBox.SelectedItem;
+            Main.Instance.m_PluginController.DeactivatePlugin(plugin);
+            Main.Instance.m_PluginController.ActivatePlugin(plugin);
+            RefreshActivePlugins();
+            RefreshDormantPlugins();
+        }
+
+        private void DormantPluginsListBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            bool state = DormantPluginsListBox.SelectedItem != null;
+            ActivatePluginButton.Enabled = state;
+            UnloadPluginButton.Enabled = state;
+        }
+
+        private void ActivatePluginButton_Click(object sender, EventArgs e)
+        {
+            if (DormantPluginsListBox.SelectedItem == null)
+            {
+                return;
+            }
+
+            var plugin = (IGUIPlugin)DormantPluginsListBox.SelectedItem;
+            Main.Instance.m_PluginController.ActivatePlugin(plugin);
+            RefreshActivePlugins();
+            RefreshDormantPlugins();
+        }
+
+        private void UnloadPluginButton_Click(object sender, EventArgs e)
+        {
+            if (DormantPluginsListBox.SelectedItem == null)
+            {
+                return;
+            }
+
+            var plugin = (IGUIPlugin)DormantPluginsListBox.SelectedItem;
+            Main.Instance.m_PluginController.UnloadPlugin(plugin);
+            RefreshActivePlugins();
+            RefreshDormantPlugins();
+        }
+
+        private void AddNewPluginButton_Click(object sender, EventArgs e)
+        {
+            if (m_AddNewPluginDialog.ShowDialog() == DialogResult.OK)
+            {
+                var path = m_AddNewPluginDialog.FileName;
+                Main.Instance.m_PluginController.AddNewAssemblyToPluginsPath(path);
+                RefreshDormantPlugins();
+            }
+        }
+
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[15,9,15,76,0],[9,9,9,31,0],[10,9,10,10,0],[11,13,11,35,0],[12,13,12,60,0],[13,9,13,10,0],[18,9,18,10,0],[19,13,19,46,0],[20,13,20,48,0],[21,13,21,50,0],[22,13,22,48,0],[24,13,24,36,0],[25,13,25,37,0],[27,13,27,72,0],[28,13,28,54,0],[29,9,29,10,0],[32,9,32,10,0],[33,13,33,80,0],[35,13,35,48,0],[36,13,36,20,0],[36,36,36,49,0],[36,22,36,32,0],[37,13,37,14,0],[38,17,38,56,0],[39,13,39,14,0],[36,33,36,35,0],[40,9,40,10,0],[43,9,43,10,0],[44,13,44,82,0],[46,13,46,49,0],[47,13,47,20,0],[47,36,47,50,0],[47,22,47,32,0],[48,13,48,14,0],[49,17,49,57,0],[50,13,50,14,0],[47,33,47,35,0],[51,9,51,10,0],[54,9,54,10,0],[55,13,55,68,0],[56,13,56,46,0],[57,13,57,48,0],[58,9,58,10,0],[61,9,61,10,0],[62,13,62,59,0],[63,13,63,14,0],[64,17,64,24,0],[67,13,67,73,0],[68,13,68,71,0],[69,13,69,36,0],[70,13,70,37,0],[71,9,71,10,0],[74,9,74,10,0],[75,13,75,59,0],[76,13,76,14,0],[77,17,77,24,0],[80,13,80,72,0],[81,13,81,71,0],[82,13,82,69,0],[83,13,83,36,0],[84,13,84,37,0],[85,9,85,10,0],[88,9,88,10,0],[89,13,89,69,0],[90,13,90,50,0],[91,13,91,48,0],[92,9,92,10,0],[95,9,95,10,0],[96,13,96,60,0],[97,13,97,14,0],[98,17,98,24,0],[101,13,101,73,0],[102,13,102,69,0],[103,13,103,36,0],[104,13,104,37,0],[105,9,105,10,0],[108,9,108,10,0],[109,13,109,60,0],[110,13,110,14,0],[111,17,111,24,0],[114,13,114,73,0],[115,13,115,67,0],[116,13,116,36,0],[117,13,117,37,0],[118,9,118,10,0],[121,9,121,10,0],[122,13,122,70,0],[123,13,123,14,0],[124,17,124,58,0],[125,17,125,84,0],[126,17,126,41,0],[127,13,127,14,0],[128,9,128,10,0]]);
+    </script>
+  </body>
+</html>

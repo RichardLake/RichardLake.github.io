@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-cmdline\progressreporter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Text.RegularExpressions;
+
+namespace CKAN.CmdLine
+{
+    /// &lt;summary&gt;
+    /// A simple class that manages progress report events for the CmdLine.
+    /// This will almost certainly need extra functionality if we deprecate the User class.
+    /// &lt;/summary&gt;
+    public static class ProgressReporter
+    {
+        /// &lt;summary&gt;
+        /// Only shows download report messages, and nothing else.
+        /// &lt;/summary&gt;
+        public static void FormattedDownloads(string message, int progress, IUser user)
+        {
+            if (Regex.IsMatch(message, &quot;download&quot;, RegexOptions.IgnoreCase))
+            {
+                user.RaiseMessage(
+                    // The \r at the front here causes download messages to *overwrite* each other.
+                    String.Format(&quot;\r{0} - {1}%           &quot;, message, progress)
+                );
+            }
+            else
+            {
+                // The percent looks weird on non-download messages.
+                // The leading newline makes sure we don&#39;t end up with a mess from previous
+                // download messages.
+                user.RaiseMessage(&quot;\n{0}&quot;, message);
+            }
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[17,13,17,77,0],[19,17,22,19,0],[23,13,23,14,0],[29,17,29,53,0],[31,9,31,10,0]]);
+    </script>
+  </body>
+</html>

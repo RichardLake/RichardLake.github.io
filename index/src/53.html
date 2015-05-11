@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\kspcommandlineoptionsdialog.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Windows.Forms;
+
+namespace CKAN
+{
+
+    public partial class KSPCommandLineOptionsDialog : FormCompatibility
+    {
+        public KSPCommandLineOptionsDialog()
+        {
+            InitializeComponent();
+            ApplyFormCompatibilityFixes();
+
+            StartPosition = FormStartPosition.CenterScreen;
+        }
+
+        public void SetCommandLine(string commandLine)
+        {
+            AdditionalArguments.Text = commandLine;
+        }
+    }
+
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[8,9,8,45,0],[9,9,9,10,0],[10,13,10,35,0],[11,13,11,43,0],[13,13,13,60,0],[14,9,14,10,0],[17,9,17,10,0],[18,13,18,52,0],[19,9,19,10,0]]);
+    </script>
+  </body>
+</html>

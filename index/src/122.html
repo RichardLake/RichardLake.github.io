@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\ks\ksapi.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Net;
+using System.Text.RegularExpressions;
+using log4net;
+using Newtonsoft.Json;
+using CurlSharp;
+
+namespace CKAN.NetKAN
+{
+    // KerbalStuff API
+    public class KSAPI
+    {
+        private static readonly Uri kerbalstuff = new Uri(&quot;https://kerbalstuff.com/&quot;);
+        private static readonly Uri kerbalstuff_api = new Uri(kerbalstuff, &quot;/api/&quot;);
+        private static readonly ILog log = LogManager.GetLogger(typeof (KSAPI));
+
+        public KSAPI()
+        {
+        }
+
+        public static string Call(string path)
+        {
+            // TODO: There&#39;s got to be a better way than using regexps.
+            // new Uri (kerbalstuff_api, path) doesn&#39;t work, it only uses the *base* of the first arg,
+            // and hence drops the /api path.
+
+            // Remove leading slashes. 
+            path = Regex.Replace(path, &quot;^/+&quot;, &quot;&quot;);
+
+            string url = kerbalstuff_api + path;
+
+            log.DebugFormat(&quot;Calling {0}&quot;, url);
+            try
+            {
+                using (var web = new Web())
+                {
+                    return web.DownloadString(url);
+                }
+            }
+            catch (DllNotFoundException)
+            {
+                //Curl is not installed. Curl is a workaround for a mono issue.
+                //TODO Richard - Once repos are merged go and check all Platform calls to see if they are mono checks
+                if (!Platform.IsWindows) throw;
+                //On mircrosft.net so try native code.
+                using (var web = new WebClient())
+                {
+                    try
+                    {
+                        return web.DownloadString(url);                            
+                    }
+                    catch (WebException web_ex)
+                    {
+                        log.ErrorFormat(&quot;WebException while accessing {0}: {1}&quot;, url, web_ex);
+                        throw;
+                    }
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Given a mod id, returns a KSMod with its metadata from the network.
+        /// &lt;/summary&gt;
+        public static KSMod Mod(int mod_id)
+        {
+            string json = Call(&quot;/mod/&quot; + mod_id);
+            return Mod(json);
+        }
+
+        /// &lt;summary&gt;
+        /// Given a JSON string, inflates and returns a KSMod.
+        /// &lt;/summary&gt;
+        public static KSMod Mod(string json)
+        {
+            return JsonConvert.DeserializeObject&lt;KSMod&gt;(json);
+        }
+
+        /// &lt;summary&gt;
+        ///     Returns the route with the KerbalStuff URI (not the API URI) pre-pended.
+        /// &lt;/summary&gt;
+        public static Uri ExpandPath(string route)
+        {
+            log.DebugFormat(&quot;Expanding {0} to full KS URL&quot;, route);
+
+            // Alas, this isn&#39;t as simple as it may sound. For some reason
+            // some—but not all—KS mods don&#39;t work the same way if the path provided
+            // is escaped or un-escaped. Since our curl implementation preserves the
+            // &quot;original&quot; string used to download a mod, we need to jump through some
+            // hoops to make sure this is escaped.
+
+            // Update: The Uri class under mono doesn&#39;t un-escape everything when
+            // .ToString() is called, even though the .NET documentation says that it
+            // should. Rather than using it and going through escaping hell, we&#39;ll simply
+            // concat our strings together and preserve escaping that way. If KS ever
+            // start returning fully qualified URLs then we should see everyting break
+            // pretty quickly, and we can rejoice because we won&#39;t need any of this code
+            // again. -- PJF, KSP-CKAN/CKAN#816.
+
+            // Step 1: Escape any spaces present. KS seems to escape everything else fine.
+            route = Regex.Replace(route, &quot; &quot;, &quot;%20&quot;);
+
+            // Step 2: Trim leading slashes and prepend the KS host
+            Uri url_fixed = new Uri(kerbalstuff + route.TrimStart(&#39;/&#39;));
+
+            // Step 3: Profit!
+            log.DebugFormat(&quot;Expanded URL is {0}&quot;, url_fixed.OriginalString);
+            return url_fixed;
+        }
+    }
+}
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[17,9,17,23,0],[18,9,18,10,0],[19,9,19,10,0],[22,9,22,10,0],[28,13,28,51,0],[30,13,30,49,0],[32,13,32,49,0],[34,13,34,14,0],[35,24,35,43,0],[36,17,36,18,0],[37,21,37,52,0],[40,13,40,41,0],[41,13,41,14,0],[44,17,44,41,0],[44,42,44,48,0],[46,24,46,49,0],[47,17,47,18,0],[49,21,49,22,0],[50,25,50,56,0],[52,21,52,48,0],[53,21,53,22,0],[54,25,54,95,0],[55,25,55,31,0],[59,9,59,10,0],[65,9,65,10,0],[66,13,66,50,0],[67,13,67,30,0],[68,9,68,10,0],[74,9,74,10,0],[75,13,75,63,0],[76,9,76,10,0],[82,9,82,10,0],[83,13,83,68,0],[100,13,100,54,0],[103,13,103,73,0],[106,13,106,78,0],[107,13,107,30,0],[108,9,108,10,0],[13,9,13,87,0],[14,9,14,85,0],[15,9,15,81,0]]);
+    </script>
+  </body>
+</html>

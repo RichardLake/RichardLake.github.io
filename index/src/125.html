@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\github\githubapi.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Linq;
+using System.Net;
+using System.Text.RegularExpressions;
+using log4net;
+using Newtonsoft.Json.Linq;
+
+// We could use OctoKit for this, but since we&#39;re only pinging the
+// release API, I&#39;m happy enough without yet another dependency.
+
+namespace CKAN.NetKAN
+{
+    public static class GithubAPI
+    {
+        private static readonly string asset_match = &quot;/asset_match/&quot;;
+        private static readonly Uri api_base = new Uri(&quot;https://api.github.com/&quot;);
+        private static readonly ILog log = LogManager.GetLogger(typeof (KSAPI));
+        private static readonly WebClient web = new WebClient();
+        private static bool done_init;
+
+        internal static void Init() {
+            if (done_init)
+            {
+                return;
+            }
+
+            // Github requires a user-agent. How about that?
+            web.Headers.Add(&quot;user-agent&quot;, Net.UserAgentString);
+
+            done_init = true;
+        }
+
+        public static void SetCredentials(string oauth_token)
+        {
+            web.Headers.Add(&quot;Authorization&quot;, String.Format(&quot;token {0}&quot;, oauth_token));
+        }
+
+        public static string Call(string path)
+        {
+            Init();
+
+            Uri url = new Uri (api_base, path);
+            log.DebugFormat(&quot;Calling {0}&quot;, url);
+
+            string result = &quot;&quot;;
+            try
+            {
+                result = web.DownloadString(url);
+            }
+            catch(WebException webEx)
+            {
+                log.ErrorFormat (&quot;WebException while accessing {0}: {1}&quot;, url, webEx);
+                throw webEx;
+            }
+
+            return result;
+        }
+
+        /// &lt;summary&gt;
+        /// Repository is in the form &quot;Author/Repo&quot;. Eg: &quot;pjf/DogeCoinFlag&quot;.
+        /// &lt;/summary&gt;
+        public static GithubRelease GetLatestRelease( string repository, bool prerelease )
+        {
+            string assetFilter = &quot;.zip&quot;;
+
+            int asset_match_index = repository.IndexOf (asset_match);
+            if (asset_match_index &gt; -1) {
+                assetFilter = repository.Substring (asset_match_index + asset_match.Length);
+                repository = repository.Substring (0, asset_match_index);
+                log.DebugFormat (&quot;Asset Filter: &#39;{0}&#39;&quot;, assetFilter);
+            }
+
+            string json = Call (&quot;repos/&quot; + repository + &quot;/releases&quot;);
+            log.Debug(&quot;Parsing JSON...&quot;);
+            JArray releases = JArray.Parse(json);
+            string releaseType = prerelease ? &quot;pre-&quot; : &quot;stable&quot;;
+            log.Debug(&quot;Parsed, finding most recent &quot; + releaseType + &quot; release&quot;);
+
+            // Finding the most recent *stable* release means filtering
+            // out on pre-releases.
+            GithubRelease result = null;
+
+            foreach (JObject release in releases)
+            {
+                // First, check for prerelease status...
+                if (prerelease == (bool)release [&quot;prerelease&quot;])
+                {
+                    JArray assets = (JArray) release [&quot;assets&quot;];
+                    foreach (JObject asset in assets)
+                    {
+                        // Then, check against the regex, which might default to &quot;.zip&quot;
+                        if (Regex.IsMatch ((string) asset [&quot;name&quot;], assetFilter, RegexOptions.IgnoreCase))
+                        {
+                            log.DebugFormat (&quot;Hit on {0}&quot;, asset.ToString ());
+                            result = new GithubRelease (release, asset);
+                            return result;
+                        }
+                    }
+                }
+            }
+
+            return result;
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[21,37,21,38,0],[22,13,22,27,0],[23,13,23,14,0],[24,17,24,24,0],[28,13,28,64,0],[30,13,30,30,0],[31,9,31,10,0],[34,9,34,10,0],[35,13,35,87,0],[36,9,36,10,0],[39,9,39,10,0],[40,13,40,20,0],[42,13,42,48,0],[43,13,43,49,0],[45,13,45,32,0],[47,13,47,14,0],[48,17,48,50,0],[49,13,49,14,0],[50,13,50,38,0],[51,13,51,14,0],[52,17,52,87,0],[53,17,53,29,0],[56,13,56,27,0],[57,9,57,10,0],[63,9,63,10,0],[64,13,64,41,0],[66,13,66,70,0],[67,13,67,40,0],[67,41,67,42,0],[68,17,68,93,0],[69,17,69,74,0],[70,17,70,70,0],[71,13,71,14,0],[73,13,73,70,0],[74,13,74,42,0],[75,13,75,50,0],[76,13,76,65,0],[77,13,77,82,0],[81,13,81,41,0],[83,13,83,20,0],[83,41,83,49,0],[83,22,83,37,0],[84,13,84,14,0],[86,17,86,64,0],[87,17,87,18,0],[88,21,88,65,0],[89,21,89,28,0],[89,47,89,53,0],[89,30,89,43,0],[90,21,90,22,0],[92,25,92,107,0],[93,25,93,26,0],[94,29,94,79,0],[95,29,95,73,0],[96,29,96,43,0],[98,21,98,22,0],[89,44,89,46,0],[99,17,99,18,0],[100,13,100,14,0],[83,38,83,40,0],[102,13,102,27,0],[103,9,103,10,0],[15,9,15,70,0],[16,9,16,83,0],[17,9,17,81,0],[18,9,18,65,0]]);
+    </script>
+  </body>
+</html>

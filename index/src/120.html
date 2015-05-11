@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\consoleuser.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.Text.RegularExpressions;
+using log4net;
+
+namespace CKAN
+{
+    public class ConsoleUser : NullUser
+    {
+        private static readonly ILog log = LogManager.GetLogger(typeof(ConsoleUser));
+
+        private bool m_Headless = false;
+        public ConsoleUser(bool headless)
+        {
+            m_Headless = headless;
+        }
+
+        protected override bool DisplayYesNoDialog(string message)
+        {
+            if (m_Headless)
+            {
+                return true;
+            }
+
+            Console.Write(&quot;{0} [Y/N] &quot;, message);
+            while (true)
+            {
+                var input = Console.In.ReadLine();
+
+                if (input == null)
+                {
+                    log.ErrorFormat(&quot;No console available for input, assuming no.&quot;);
+                    return false;
+                }
+
+                input = input.ToLower().Trim();
+
+                if (input.Equals(&quot;y&quot;) || input.Equals(&quot;yes&quot;))
+                {
+                    return true;
+                }
+                if (input.Equals(&quot;n&quot;) || input.Equals(&quot;no&quot;))
+                {
+                    return false;
+                }
+                Console.Write(&quot;Invaild input. Please enter yes or no&quot;);
+            }
+        }
+
+        protected override void DisplayMessage(string message, params object[] args)
+        {
+            Console.WriteLine(message, args);
+        }
+
+        protected override void DisplayError(string message, params object[] args)
+        {
+            Console.Error.WriteLine(message, args);
+        }
+
+        protected override void ReportProgress(string format, int percent)
+        {
+            if (Regex.IsMatch(format, &quot;download&quot;, RegexOptions.IgnoreCase))
+            {
+                Console.Write(
+                    // The \r at the front here causes download messages to *overwrite* each other.
+                     String.Format(&quot;\r{0} - {1}%           &quot;, format, percent)
+                 );
+            }
+            else
+            {
+                // The percent looks weird on non-download messages.
+                // The leading newline makes sure we don&#39;t end up with a mess from previous
+                // download messages.
+                Console.Write(&quot;\n{0}&quot;, format);
+            }
+        }
+        protected override void ReportDownloadsComplete(Uri[] urls, string[] filenames, Exception[] errors)
+        {
+        }
+        public override int WindowWidth
+        {
+            get { return Console.WindowWidth; }
+        }
+
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[11,9,11,41,0],[12,9,12,42,0],[13,9,13,10,0],[14,13,14,35,0],[15,9,15,10,0],[18,9,18,10,0],[19,13,19,28,0],[20,13,20,14,0],[21,17,21,29,0],[24,13,24,50,0],[26,13,26,14,0],[27,17,27,51,0],[29,17,29,35,0],[30,17,30,18,0],[31,21,31,85,0],[32,21,32,34,0],[35,17,35,48,0],[37,17,37,62,0],[38,17,38,18,0],[39,21,39,33,0],[41,17,41,61,0],[42,17,42,18,0],[43,21,43,34,0],[45,17,45,72,0],[46,13,46,14,0],[25,13,25,25,0],[47,9,47,10,0],[50,9,50,10,0],[51,13,51,46,0],[52,9,52,10,0],[55,9,55,10,0],[56,13,56,52,0],[57,9,57,10,0],[60,9,60,10,0],[61,13,61,76,0],[62,13,62,14,0],[63,17,66,20,0],[67,13,67,14,0],[69,13,69,14,0],[73,17,73,48,0],[74,13,74,14,0],[75,9,75,10,0],[77,9,77,10,0],[78,9,78,10,0],[81,17,81,18,0],[81,19,81,46,0],[81,47,81,48,0],[9,9,9,86,0]]);
+    </script>
+  </body>
+</html>

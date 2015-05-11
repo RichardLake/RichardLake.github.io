@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\main.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Windows.Forms;
+using log4net;
+using System.Collections.Generic;
+
+namespace CKAN
+{
+    public enum GUIModFilter
+    {
+        Compatible = 0,
+        Installed = 1,
+        InstalledUpdateAvailable = 2,
+        NewInRepository = 3,
+        NotInstalled = 4,
+        Incompatible = 5,
+        All = 6
+    }
+
+    public enum GUIModChangeType
+    {
+        None = 0,
+        Install = 1,
+        Remove = 2,
+        Update = 3
+    }
+
+    public partial class Main
+    {
+        public delegate void ModChangedCallback(CkanModule module, GUIModChangeType change);
+
+        public static event ModChangedCallback modChangedCallback;
+
+        public Configuration m_Configuration;
+
+        public ControlFactory controlFactory;
+
+        private static readonly ILog log = LogManager.GetLogger(typeof(Main));
+        public TabController m_TabController;
+        public volatile KSPManager manager;
+
+        public PluginController m_PluginController = null;
+
+        public KSP CurrentInstance
+        {
+            get { return manager.CurrentInstance; }
+        }
+
+        public KSPManager Manager
+        {
+            get { return manager; }
+            set { manager = value; }
+        }
+
+        public MainModList mainModList { get; private set; }
+
+        public string[] m_CommandLineArgs = null;
+
+        public GUIUser m_User = null;
+
+        public Main(string[] cmdlineArgs, GUIUser User, bool showConsole)
+        {
+            m_CommandLineArgs = cmdlineArgs;
+            m_User = User;
+
+            User.displayMessage = AddStatusMessage;
+            User.displayError = ErrorDialog;
+
+            controlFactory = new ControlFactory();
+            Instance = this;
+            mainModList = new MainModList(source =&gt; UpdateFilters(this));
+            InitializeComponent();
+
+            // We need to initialize error dialog first to display errors
+            m_ErrorDialog = controlFactory.CreateControl&lt;ErrorDialog&gt;();
+
+            // We want to check our current instance is null first, as it may
+            // have already been set by a command-line option.
+            Manager = new KSPManager(User);
+            if (CurrentInstance == null &amp;&amp; manager.GetPreferredInstance() == null)
+            {
+                Hide();
+
+                var result = new ChooseKSPInstance().ShowDialog();
+                if (result == DialogResult.Cancel || result == DialogResult.Abort)
+                {
+                    Application.Exit();
+                    return;
+                }
+            }
+
+            m_Configuration = Configuration.LoadOrCreateConfiguration
+            (
+                Path.Combine(CurrentInstance.GameDir(), &quot;CKAN/GUIConfig.xml&quot;),
+                Repo.default_ckan_repo.ToString()
+            );
+
+            FilterToolButton.MouseHover += (sender, args) =&gt; FilterToolButton.ShowDropDown();
+            launchKSPToolStripMenuItem.MouseHover += (sender, args) =&gt; launchKSPToolStripMenuItem.ShowDropDown();
+            ApplyToolButton.MouseHover += (sender, args) =&gt; ApplyToolButton.ShowDropDown();
+
+            ModList.CurrentCellDirtyStateChanged += ModList_CurrentCellDirtyStateChanged;
+            ModList.CellValueChanged += ModList_CellValueChanged;
+
+            m_TabController = new TabController(MainTabControl);
+            m_TabController.ShowTab(&quot;ManageModsTabPage&quot;);
+
+            RecreateDialogs();
+
+            if (!showConsole)
+            {
+                Util.HideConsoleWindow();
+            }
+
+            // Disable the modinfo controls until a mod has been choosen.
+            this.ModInfoTabControl.Enabled = false;
+
+            Application.Run(this);
+        }
+
+        void ModList_CurrentCellDirtyStateChanged(object sender, EventArgs e)
+        {
+            ModList_CellContentClick(sender, null);
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            switch (keyData)
+            {
+                case (Keys.Control | Keys.F):
+                    ActiveControl = FilterByNameTextBox;
+                    return true;
+                case (Keys.Control | Keys.S):
+                    var registry = RegistryManager.Instance(CurrentInstance).registry;
+                    if (mainModList.ComputeChangeSetFromModList(registry, CurrentInstance).Any())
+                    {
+                        ApplyToolButton_Click(null, null);
+                    }
+
+                    return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        public static Main Instance { get; private set; }
+
+        private void Main_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            m_Configuration.WindowLoc = this.Location;
+
+            // Copy window size to app settings
+            if (this.WindowState == FormWindowState.Normal)
+            {
+               m_Configuration.WindowSize = this.Size;
+            }
+            else
+            {
+                m_Configuration.WindowSize = this.RestoreBounds.Size;
+            }
+
+            // Save settings
+            m_Configuration.Save();
+        }
+
+        private void Main_Load(object sender, EventArgs e)
+        {
+            if (!m_Configuration.CheckForUpdatesOnLaunchNoNag)
+            {
+                if (new AskUserForAutoUpdatesDialog().ShowDialog() == DialogResult.OK)
+                {
+                    m_Configuration.CheckForUpdatesOnLaunch = true;
+                }
+
+                m_Configuration.CheckForUpdatesOnLaunchNoNag = true;
+                m_Configuration.Save();
+            }
+
+            if (m_Configuration.CheckForUpdatesOnLaunch)
+            {
+                try
+                {
+                    var latest_version = AutoUpdate.FetchLatestCkanVersion();
+                    var current_version = new Version(Meta.Version());
+
+                    if (latest_version.IsGreaterThan(current_version))
+                    {
+                        var release_notes = AutoUpdate.FetchLatestCkanVersionReleaseNotes();
+                        var dialog = new NewUpdateDialog(latest_version.ToString(), release_notes);
+                        if (dialog.ShowDialog() == DialogResult.OK)
+                        {
+                            AutoUpdate.StartUpdateProcess(true);
+                        }
+                    }
+                }
+                catch (Exception exception)
+                {
+                    m_User.RaiseError(&quot;Error in autoupdate: \n\t&quot;+exception.Message +&quot;&quot;);                    
+                }      
+            }
+
+            Location = m_Configuration.WindowLoc;
+            Size = m_Configuration.WindowSize;
+
+            m_UpdateRepoWorker = new BackgroundWorker {WorkerReportsProgress = false, WorkerSupportsCancellation = true};
+
+            m_UpdateRepoWorker.RunWorkerCompleted += PostUpdateRepo;
+            m_UpdateRepoWorker.DoWork += UpdateRepo;
+
+            m_InstallWorker = new BackgroundWorker { WorkerReportsProgress = true, WorkerSupportsCancellation = true };
+            m_InstallWorker.RunWorkerCompleted += PostInstallMods;
+            m_InstallWorker.DoWork += InstallMods;
+
+            UpdateModsList();
+
+            m_User.displayYesNo = YesNoDialog;
+            URLHandlers.RegisterURLHandler(m_Configuration, m_User);
+            m_User.displayYesNo = null;
+
+            ApplyToolButton.Enabled = false;
+
+            ModList.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.AllCells);
+
+            Text = String.Format(&quot;CKAN {0} - KSP {1}&quot;, Meta.Version(), CurrentInstance.Version());
+            KSPVersionLabel.Text = String.Format(&quot;Kerbal Space Program {0}&quot;, CurrentInstance.Version());
+
+            if (m_CommandLineArgs.Length &gt;= 2)
+            {
+                var identifier = m_CommandLineArgs[1];
+                if (identifier.StartsWith(&quot;//&quot;))
+                {
+                    identifier = identifier.Substring(2);
+                }
+                else if (identifier.StartsWith(&quot;ckan://&quot;))
+                {
+                    identifier = identifier.Substring(7);
+                }
+
+                if (identifier.EndsWith(&quot;/&quot;))
+                {
+                    identifier = identifier.Substring(0, identifier.Length - 1);
+                }
+
+                int i = 0;
+                foreach (DataGridViewRow row in ModList.Rows)
+                {
+                    var module = ((GUIMod)row.Tag).ToCkanModule();
+                    if (identifier == module.identifier)
+                    {
+                        ModList.FirstDisplayedScrollingRowIndex = i;
+                        row.Selected = true;
+                        break;
+                    }
+
+                    i++;
+                }
+            }
+
+            var pluginsPath = Path.Combine(CurrentInstance.CkanDir(), &quot;Plugins&quot;);
+            if (!Directory.Exists(pluginsPath))
+            {
+                Directory.CreateDirectory(pluginsPath);
+            }
+
+            m_PluginController = new PluginController(pluginsPath, true);
+        }
+
+        private void RefreshToolButton_Click(object sender, EventArgs e)
+        {
+            UpdateRepo();
+        }
+
+        private void MarkAllUpdatesToolButton_Click(object sender, EventArgs e)
+        {
+            foreach (DataGridViewRow row in ModList.Rows)
+            {
+                var mod = ((GUIMod)row.Tag).ToCkanModule();
+                var registry = RegistryManager.Instance(CurrentInstance).registry;
+                if (!registry.IsInstalled(mod.identifier))
+                {
+                    continue;
+                }
+
+                bool isUpToDate =
+                    !registry.InstalledVersion(mod.identifier).IsLessThan(mod.version);
+                if (!isUpToDate)
+                {
+                    var cell = row.Cells[1] as DataGridViewCheckBoxCell;
+                    if (cell != null)
+                    {
+                        var updateCell = cell;
+                        updateCell.Value = true;
+                        ApplyToolButton.Enabled = true;
+                    }
+                }
+            }
+
+            ModList.Refresh();
+        }
+
+        private void ModList_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (ModList.SelectedRows.Count == 0)
+            {
+                // We have an invalid module object, disable the ModInfoTabControl to avoid errors.
+                this.ModInfoTabControl.Enabled = false;
+
+                return;
+            }
+
+            DataGridViewRow selectedItem = ModList.SelectedRows[0];
+            if (selectedItem == null)
+            {
+                // We have an invalid module object, disable the ModInfoTabControl to avoid errors.
+                this.ModInfoTabControl.Enabled = false;
+
+                return;
+            }
+
+            var module = ((GUIMod)selectedItem.Tag).ToCkanModule();
+            if (module == null)
+            {
+                // We have an invalid module object, disable the ModInfoTabControl to avoid errors.
+                this.ModInfoTabControl.Enabled = false;
+
+                return;
+            }
+
+            // We are sure we have a valid module object, enable the ModInfoTabControl.
+            this.ModInfoTabControl.Enabled = true;
+
+            UpdateModInfo(module);
+            UpdateModDependencyGraph(module);
+            UpdateModContentsTree(module);
+        }
+
+        private void ApplyToolButton_Click(object sender, EventArgs e)
+        {
+            m_TabController.ShowTab(&quot;ChangesetTabPage&quot;, 1);
+        }
+
+        private void ExitToolButton_Click(object sender, EventArgs e)
+        {
+            Close();
+        }
+
+        private void FilterByNameTextBox_TextChanged(object sender, EventArgs e)
+        {
+            mainModList.ModNameFilter = FilterByNameTextBox.Text;
+        }
+
+        private void FilterByAuthorTextBox_TextChanged(object sender, EventArgs e)
+        {
+            mainModList.ModAuthorFilter = FilterByAuthorTextBox.Text;
+        }
+
+        /// &lt;summary&gt;
+        /// Called on key press when the mod is focused. Scrolls to the first mod 
+        /// with name begining with the key pressed. If space is pressed, the checkbox
+        /// at the current row is toggled.
+        /// &lt;/summary&gt;        
+        private void ModList_KeyPress(object sender, KeyPressEventArgs e)
+        {
+            // Check the key. If it is space, mark the current mod as selected.
+            if (e.KeyChar.ToString() == &quot; &quot;)
+            {
+                var selectedRow = ModList.CurrentRow;
+
+                if (selectedRow != null)
+                {
+                    // Get the checkbox.
+                    var selectedRowCheckBox = (DataGridViewCheckBoxCell)selectedRow.Cells[&quot;Installed&quot;];
+
+                    // Invert the value.
+                    bool selectedValue = (bool)selectedRowCheckBox.Value;
+                    selectedRowCheckBox.Value = !selectedValue;
+                }
+                return;
+            }
+
+            var rows = ModList.Rows.Cast&lt;DataGridViewRow&gt;().Where(row =&gt; row.Visible);
+            var does_name_begin_with_char = new Func&lt;DataGridViewRow, bool&gt;(row =&gt;
+            {
+                var modname = ((GUIMod)row.Tag).ToCkanModule().name;
+                var key = e.KeyChar.ToString();
+                return modname.StartsWith(key, StringComparison.OrdinalIgnoreCase);
+            });
+            ModList.ClearSelection();
+            DataGridViewRow match = rows.FirstOrDefault(does_name_begin_with_char);
+            if (match != null)
+            {
+                match.Selected = true;
+                ModList.CurrentCell = match.Cells[0];            
+            }                                        
+        }
+
+        /// &lt;summary&gt;
+        /// I&#39;m pretty sure this is what gets called when the user clicks on a ticky
+        /// in the mod list.
+        /// &lt;/summary&gt;
+        private void ModList_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        {
+
+            ModList.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        }
+
+        private void ModList_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            if (mainModList.ModFilter == GUIModFilter.Incompatible)
+            {
+                return;
+            }
+            var grid = sender as DataGridView;
+            var row = grid.Rows[e.RowIndex];
+            var columnIndex = e.ColumnIndex;
+            var gridViewCell = row.Cells[columnIndex];
+            if (columnIndex &lt; 2)
+            {
+                var checkbox = (DataGridViewCheckBoxCell)gridViewCell;
+
+                if (columnIndex == 0)
+                {
+                    ((GUIMod)row.Tag).IsInstallChecked = (bool)checkbox.Value;
+                }
+                else if (columnIndex == 1)
+                {
+                    ((GUIMod)row.Tag).IsUpgradeChecked = (bool)checkbox.Value;
+                }
+            }
+            var changeset = mainModList.ComputeChangeSetFromModList(RegistryManager.Instance(CurrentInstance).registry, CurrentInstance);
+
+
+            if (changeset != null &amp;&amp; changeset.Any())
+            {
+                UpdateChangesDialog(changeset, m_InstallWorker);
+                m_TabController.ShowTab(&quot;ChangesetTabPage&quot;, 1, false);
+                ApplyToolButton.Enabled = true;
+            }
+            else
+            {
+                m_TabController.HideTab(&quot;ChangesetTabPage&quot;);
+                ApplyToolButton.Enabled = false;
+            }
+
+            if (e.RowIndex &lt; 0 || columnIndex &lt; 0)
+            {
+                return;
+            }
+
+
+            if (gridViewCell is DataGridViewLinkCell)
+            {
+                var cell = gridViewCell as DataGridViewLinkCell;
+                Process.Start(cell.Value.ToString());
+            }
+        }
+
+        private void FilterCompatibleButton_Click(object sender, EventArgs e)
+        {
+            mainModList.ModFilter = GUIModFilter.Compatible;
+            FilterToolButton.Text = &quot;Filter (Compatible)&quot;;
+        }
+
+        private void FilterInstalledButton_Click(object sender, EventArgs e)
+        {
+            mainModList.ModFilter = GUIModFilter.Installed;
+            FilterToolButton.Text = &quot;Filter (Installed)&quot;;
+        }
+
+        private void FilterInstalledUpdateButton_Click(object sender, EventArgs e)
+        {
+            mainModList.ModFilter = GUIModFilter.InstalledUpdateAvailable;
+            FilterToolButton.Text = &quot;Filter (Upgradeable)&quot;;
+        }
+
+        private void FilterNewButton_Click(object sender, EventArgs e)
+        {
+            mainModList.ModFilter = GUIModFilter.NewInRepository;
+            FilterToolButton.Text = &quot;Filter (New)&quot;;
+        }
+
+        private void FilterNotInstalledButton_Click(object sender, EventArgs e)
+        {
+            mainModList.ModFilter = GUIModFilter.NotInstalled;
+            FilterToolButton.Text = &quot;Filter (Not installed)&quot;;
+        }
+
+        private void FilterIncompatibleButton_Click(object sender, EventArgs e)
+        {
+            mainModList.ModFilter = GUIModFilter.Incompatible;
+            FilterToolButton.Text = &quot;Filter (Incompatible)&quot;;
+        }
+
+        private void FilterAllButton_Click(object sender, EventArgs e)
+        {
+            mainModList.ModFilter = GUIModFilter.All;
+            FilterToolButton.Text = &quot;Filter (All)&quot;;
+        }
+
+        private void ContentsDownloadButton_Click(object sender, EventArgs e)
+        {
+            if (ModList.SelectedRows.Count == 0)
+            {
+                return;
+            }
+
+            DataGridViewRow selectedItem = ModList.SelectedRows[0];
+            if (selectedItem == null)
+            {
+                return;
+            }
+
+            var module = ((GUIMod)selectedItem.Tag).ToCkanModule();
+            if (module == null)
+            {
+                return;
+            }
+
+            ResetProgress();
+            ShowWaitDialog(false);
+            ModuleInstaller.GetInstance(CurrentInstance, GUI.user).CachedOrDownload(module);
+            HideWaitDialog(true);
+
+            UpdateModContentsTree(module);
+            RecreateDialogs();
+        }
+
+        private void MetadataModuleHomePageLinkLabel_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            if (MetadataModuleHomePageLinkLabel.Text == &quot;N/A&quot;)
+            {
+                return;
+            }
+
+            TryOpenWebPage(MetadataModuleHomePageLinkLabel.Text);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns true if the string could be a valid http address.
+        /// DOES NOT ACTUALLY CHECK IF IT EXISTS, just the format.
+        /// &lt;/summary&gt;
+        public static bool CheckURLValid(string source)
+        {
+            Uri uriResult;
+            return Uri.TryCreate(source, UriKind.Absolute, out uriResult) &amp;&amp; uriResult.Scheme == Uri.UriSchemeHttp;
+        }
+
+        /// &lt;summary&gt;
+        /// Tries to open an url using the default application.
+        /// If it fails, it tries again by prepending each prefix before the url before it gives up.
+        /// &lt;/summary&gt;
+        static bool TryOpenWebPage(string url, IEnumerable&lt;string&gt; prefixes = null)
+        {
+            // Default prefixes to try if not provided
+            if (prefixes == null)
+                prefixes = new string[] { &quot;http://&quot;, &quot;https:// &quot; };
+
+            try // opening the page normally
+            {
+                Process.Start(url);
+                return true; // we did it! return true
+            }
+            catch (Exception) // something bad happened
+            {
+                foreach (string p in prefixes)
+                {
+                    try // with a new prefix
+                    {
+                        string tmp = p + url;
+                        if (CheckURLValid(tmp))
+                        {
+                            Process.Start(p + url);
+                            return true;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // move along to the next prefix
+                    }
+                }
+
+                // We tried all prefixes, and still no luck.
+                return false;
+            }
+        }
+
+        private void MetadataModuleGitHubLinkLabel_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            if (MetadataModuleGitHubLinkLabel.Text == &quot;N/A&quot;)
+            {
+                return;
+            }
+
+            Process.Start(MetadataModuleGitHubLinkLabel.Text);
+        }
+
+        private void ModuleRelationshipType_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (ModList.SelectedRows.Count == 0)
+            {
+                return;
+            }
+
+            DataGridViewRow selectedItem = ModList.SelectedRows[0];
+            if (selectedItem == null)
+            {
+                return;
+            }
+
+            var module = ((GUIMod)selectedItem.Tag).ToCkanModule();
+            if (module == null)
+            {
+                return;
+            }
+
+            UpdateModDependencyGraph(module);
+        }
+
+
+        private void launchKSPToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var lst = m_Configuration.CommandLineArguments.Split(&#39; &#39;);
+            if (lst.Length == 0)
+            {
+                return;
+            }
+
+            string binary = lst[0];
+            string args = String.Empty;
+
+            for (int i = 1; i &lt; lst.Length; i++)
+            {
+                args += lst[i] + &quot; &quot;;
+            }
+
+            try
+            {
+                Directory.SetCurrentDirectory(CurrentInstance.GameDir());
+                Process.Start(binary, args);
+            }
+            catch (Exception exception)
+            {
+                GUI.user.RaiseError(&quot;Couldn&#39;t start KSP. {0}.&quot;, exception.Message);
+            }
+        }
+
+        private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var dialog = new AboutDialog();
+            dialog.ShowDialog();
+        }
+
+        private void KSPCommandlineToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var dialog = new KSPCommandLineOptionsDialog();
+            dialog.SetCommandLine(m_Configuration.CommandLineArguments);
+            if (dialog.ShowDialog() == DialogResult.OK)
+            {
+                m_Configuration.CommandLineArguments = dialog.AdditionalArguments.Text;
+                m_Configuration.Save();
+            }
+        }
+
+        private void CKANSettingsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            // Flipping enabled here hides the main form itself.
+            Enabled = false;
+            m_SettingsDialog.ShowDialog();
+            Enabled = true;
+        }
+
+        private void pluginsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Enabled = false;
+            m_PluginsDialog.ShowDialog();
+            Enabled = true;
+        }
+
+        private OpenFileDialog m_OpenFileDialog = new OpenFileDialog();
+
+        private void installFromckanToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            m_OpenFileDialog.Filter = &quot;CKAN metadata (*.ckan)|*.ckan&quot;;
+
+            if (m_OpenFileDialog.ShowDialog() == DialogResult.OK)
+            {
+                var path = m_OpenFileDialog.FileName;
+                CkanModule module = null;
+
+                try
+                {
+                    module = CkanModule.FromFile(path);
+                }
+                catch (Kraken kraken)
+                {
+                    m_User.RaiseError(kraken.Message + &quot;: &quot; + kraken.InnerException.Message);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    m_User.RaiseError(ex.Message);
+                    return;
+                }
+
+                // We&#39;ll need to make some registry changes to do this.
+                RegistryManager registry_manager = RegistryManager.Instance(CurrentInstance);
+
+                // Remove this version of the module in the registry, if it exists.
+                registry_manager.registry.RemoveAvailable(module);
+
+                // Sneakily add our version in...
+                registry_manager.registry.AddAvailable(module);
+
+                var changeset = new List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;();
+                changeset.Add(new KeyValuePair&lt;CkanModule, GUIModChangeType&gt;(module, GUIModChangeType.Install));
+
+                menuStrip1.Enabled = false;
+
+                RelationshipResolverOptions install_ops = RelationshipResolver.DefaultOpts();
+                install_ops.with_recommends = false;
+
+                m_InstallWorker.RunWorkerAsync(
+                    new KeyValuePair&lt;List&lt;KeyValuePair&lt;CkanModule, GUIModChangeType&gt;&gt;, RelationshipResolverOptions&gt;(
+                        changeset, install_ops));
+                m_Changeset = null;
+
+                UpdateChangesDialog(null, m_InstallWorker);
+                ShowWaitDialog();
+
+            }
+        }
+    }
+
+    public class GUIUser : NullUser
+    {
+        public delegate bool DisplayYesNo(string message);
+
+        public Action&lt;string, object[]&gt; displayMessage;
+        public Action&lt;string, object[]&gt; displayError;
+        public DisplayYesNo displayYesNo;
+
+
+        protected override bool DisplayYesNoDialog(string message)
+        {
+            if (displayYesNo == null)
+            {
+                return true;
+            }
+
+            return displayYesNo(message);
+        }
+
+        protected override void DisplayMessage(string message, params object[] args)
+        {
+            displayMessage(message, args);
+        }
+
+        protected override void DisplayError(string message, params object[] args)
+        {
+            displayError(message, args);
+        }
+
+        protected override void ReportProgress(string format, int percent)
+        {
+            Main.Instance.SetDescription(format + &quot; - &quot; + percent + &quot;%&quot;);
+            Main.Instance.SetProgress(percent);
+        }
+
+        public override int WindowWidth
+        {
+            get { return -1; }
+        }
+
+
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[50,17,50,18,0],[50,19,50,50,0],[50,51,50,52,0],[55,17,55,18,0],[55,19,55,34,0],[55,35,55,36,0],[56,17,56,18,0],[56,19,56,35,0],[56,36,56,37,0],[59,42,59,46,0],[59,47,59,59,0],[46,9,46,59,0],[61,9,61,50,0],[63,9,63,38,0],[683,9,683,72,0],[65,9,65,74,0],[66,9,66,10,0],[67,13,67,45,0],[68,13,68,27,0],[70,13,70,52,0],[71,13,71,45,0],[73,13,73,51,0],[74,13,74,29,0],[75,13,75,53,0],[75,72,75,74,0],[76,13,76,35,0],[79,13,79,73,0],[83,13,83,44,0],[84,13,84,83,0],[85,13,85,14,0],[86,17,86,24,0],[88,17,88,67,0],[89,17,89,83,0],[90,17,90,18,0],[91,21,91,40,0],[92,21,92,28,0],[94,13,94,14,0],[96,13,100,15,0],[102,13,102,62,0],[102,93,102,94,0],[103,13,103,72,0],[103,113,103,114,0],[104,13,104,61,0],[104,91,104,92,0],[106,13,106,90,0],[107,13,107,66,0],[109,13,109,65,0],[110,13,110,58,0],[112,13,112,31,0],[114,13,114,30,0],[115,13,115,14,0],[116,17,116,42,0],[117,13,117,14,0],[120,13,120,52,0],[122,13,122,35,0],[123,9,123,10,0],[126,9,126,10,0],[127,13,127,52,0],[128,9,128,10,0],[131,9,131,10,0],[132,13,132,29,0],[135,21,135,57,0],[136,21,136,33,0],[138,21,138,87,0],[139,21,139,98,0],[140,21,140,22,0],[141,25,141,59,0],[142,21,142,22,0],[144,21,144,33,0],[147,13,147,57,0],[148,9,148,10,0],[150,39,150,43,0],[150,44,150,56,0],[153,9,153,10,0],[154,13,154,55,0],[157,13,157,60,0],[158,13,158,14,0],[159,16,159,55,0],[160,13,160,14,0],[162,13,162,14,0],[163,17,163,70,0],[164,13,164,14,0],[167,13,167,36,0],[168,9,168,10,0],[171,9,171,10,0],[172,13,172,63,0],[173,13,173,14,0],[174,17,174,87,0],[175,17,175,18,0],[176,21,176,68,0],[177,17,177,18,0],[179,17,179,69,0],[180,17,180,40,0],[181,13,181,14,0],[183,13,183,57,0],[184,13,184,14,0],[186,17,186,18,0],[187,21,187,78,0],[188,21,188,71,0],[190,21,190,71,0],[191,21,191,22,0],[192,25,192,93,0],[193,25,193,100,0],[194,25,194,68,0],[195,25,195,26,0],[196,29,196,65,0],[197,25,197,26,0],[198,21,198,22,0],[199,17,199,18,0],[200,17,200,44,0],[201,17,201,18,0],[202,21,202,90,0],[203,17,203,18,0],[204,13,204,14,0],[206,13,206,50,0],[207,13,207,47,0],[209,13,209,122,0],[211,13,211,69,0],[212,13,212,53,0],[214,13,214,120,0],[215,13,215,67,0],[216,13,216,51,0],[218,13,218,30,0],[220,13,220,47,0],[221,13,221,69,0],[222,13,222,40,0],[224,13,224,45,0],[226,13,226,81,0],[228,13,228,99,0],[229,13,229,105,0],[231,13,231,47,0],[232,13,232,14,0],[233,17,233,55,0],[234,17,234,49,0],[235,17,235,18,0],[236,21,236,58,0],[237,17,237,18,0],[238,22,238,59,0],[239,17,239,18,0],[240,21,240,58,0],[241,17,241,18,0],[243,17,243,46,0],[244,17,244,18,0],[245,21,245,81,0],[246,17,246,18,0],[248,17,248,27,0],[249,17,249,24,0],[249,49,249,61,0],[249,26,249,45,0],[250,17,250,18,0],[251,21,251,67,0],[252,21,252,57,0],[253,21,253,22,0],[254,25,254,69,0],[255,25,255,45,0],[256,25,256,31,0],[259,21,259,25,0],[260,17,260,18,0],[249,46,249,48,0],[261,13,261,14,0],[263,13,263,82,0],[264,13,264,48,0],[265,13,265,14,0],[266,17,266,56,0],[267,13,267,14,0],[269,13,269,74,0],[270,9,270,10,0],[273,9,273,10,0],[274,13,274,26,0],[275,9,275,10,0],[278,9,278,10,0],[279,13,279,20,0],[279,45,279,57,0],[279,22,279,41,0],[280,13,280,14,0],[281,17,281,60,0],[282,17,282,83,0],[283,17,283,59,0],[284,17,284,18,0],[285,21,285,30,0],[288,17,289,88,0],[290,17,290,33,0],[291,17,291,18,0],[292,21,292,73,0],[293,21,293,38,0],[294,21,294,22,0],[295,25,295,47,0],[296,25,296,49,0],[297,25,297,56,0],[298,21,298,22,0],[299,17,299,18,0],[300,13,300,14,0],[279,42,279,44,0],[302,13,302,31,0],[303,9,303,10,0],[306,9,306,10,0],[307,13,307,49,0],[308,13,308,14,0],[310,17,310,56,0],[312,17,312,24,0],[315,13,315,68,0],[316,13,316,38,0],[317,13,317,14,0],[319,17,319,56,0],[321,17,321,24,0],[324,13,324,68,0],[325,13,325,32,0],[326,13,326,14,0],[328,17,328,56,0],[330,17,330,24,0],[334,13,334,51,0],[336,13,336,35,0],[337,13,337,46,0],[338,13,338,43,0],[339,9,339,10,0],[342,9,342,10,0],[343,13,343,60,0],[344,9,344,10,0],[347,9,347,10,0],[348,13,348,21,0],[349,9,349,10,0],[352,9,352,10,0],[353,13,353,66,0],[354,9,354,10,0],[357,9,357,10,0],[358,13,358,70,0],[359,9,359,10,0],[367,9,367,10,0],[369,13,369,45,0],[370,13,370,14,0],[371,17,371,54,0],[373,17,373,41,0],[374,17,374,18,0],[376,21,376,104,0],[379,21,379,74,0],[380,21,380,64,0],[381,17,381,18,0],[382,17,382,24,0],[385,13,385,74,0],[385,85,385,87,0],[386,13,387,13,0],[387,14,388,17,0],[388,69,389,17,0],[389,48,390,17,0],[390,84,391,13,0],[391,14,391,16,0],[392,13,392,38,0],[393,13,393,84,0],[394,13,394,31,0],[395,13,395,14,0],[396,17,396,39,0],[397,17,397,54,0],[398,13,398,14,0],[399,9,399,10,0],[406,9,406,10,0],[408,13,408,70,0],[409,9,409,10,0],[412,9,412,10,0],[413,13,413,68,0],[414,13,414,14,0],[415,17,415,24,0],[417,13,417,47,0],[418,13,418,45,0],[419,13,419,45,0],[420,13,420,55,0],[421,13,421,33,0],[422,13,422,14,0],[423,17,423,71,0],[425,17,425,38,0],[426,17,426,18,0],[427,21,427,79,0],[428,17,428,18,0],[429,22,429,43,0],[430,17,430,18,0],[431,21,431,79,0],[432,17,432,18,0],[433,13,433,14,0],[434,13,434,138,0],[437,13,437,54,0],[438,13,438,14,0],[439,17,439,65,0],[440,17,440,71,0],[441,17,441,48,0],[442,13,442,14,0],[444,13,444,14,0],[445,17,445,61,0],[446,17,446,49,0],[447,13,447,14,0],[449,13,449,51,0],[450,13,450,14,0],[451,17,451,24,0],[455,13,455,54,0],[456,13,456,14,0],[457,17,457,65,0],[458,17,458,54,0],[459,13,459,14,0],[460,9,460,10,0],[463,9,463,10,0],[464,13,464,61,0],[465,13,465,59,0],[466,9,466,10,0],[469,9,469,10,0],[470,13,470,60,0],[471,13,471,58,0],[472,9,472,10,0],[475,9,475,10,0],[476,13,476,75,0],[477,13,477,60,0],[478,9,478,10,0],[481,9,481,10,0],[482,13,482,66,0],[483,13,483,52,0],[484,9,484,10,0],[487,9,487,10,0],[488,13,488,63,0],[489,13,489,62,0],[490,9,490,10,0],[493,9,493,10,0],[494,13,494,63,0],[495,13,495,61,0],[496,9,496,10,0],[499,9,499,10,0],[500,13,500,54,0],[501,13,501,52,0],[502,9,502,10,0],[505,9,505,10,0],[506,13,506,49,0],[507,13,507,14,0],[508,17,508,24,0],[511,13,511,68,0],[512,13,512,38,0],[513,13,513,14,0],[514,17,514,24,0],[517,13,517,68,0],[518,13,518,32,0],[519,13,519,14,0],[520,17,520,24,0],[523,13,523,29,0],[524,13,524,35,0],[525,13,525,93,0],[526,13,526,34,0],[528,13,528,43,0],[529,13,529,31,0],[530,9,530,10,0],[533,9,533,10,0],[534,13,534,63,0],[535,13,535,14,0],[536,17,536,24,0],[539,13,539,66,0],[540,9,540,10,0],[547,9,547,10,0],[549,13,549,116,0],[550,9,550,10,0],[557,9,557,10,0],[559,13,559,34,0],[560,17,560,68,0],[563,13,563,14,0],[564,17,564,36,0],[565,17,565,29,0],[567,13,567,30,0],[568,13,568,14,0],[569,17,569,24,0],[569,38,569,46,0],[569,26,569,34,0],[570,17,570,18,0],[572,21,572,22,0],[573,25,573,46,0],[574,25,574,48,0],[575,25,575,26,0],[576,29,576,52,0],[577,29,577,41,0],[579,21,579,22,0],[580,21,580,38,0],[581,21,581,22,0],[583,21,583,22,0],[584,17,584,18,0],[569,35,569,37,0],[587,17,587,30,0],[589,9,589,10,0],[592,9,592,10,0],[593,13,593,61,0],[594,13,594,14,0],[595,17,595,24,0],[598,13,598,63,0],[599,9,599,10,0],[602,9,602,10,0],[603,13,603,49,0],[604,13,604,14,0],[605,17,605,24,0],[608,13,608,68,0],[609,13,609,38,0],[610,13,610,14,0],[611,17,611,24,0],[614,13,614,68,0],[615,13,615,32,0],[616,13,616,14,0],[617,17,617,24,0],[620,13,620,46,0],[621,9,621,10,0],[625,9,625,10,0],[626,13,626,71,0],[627,13,627,33,0],[628,13,628,14,0],[629,17,629,24,0],[632,13,632,36,0],[633,13,633,40,0],[635,18,635,27,0],[636,13,636,14,0],[637,17,637,38,0],[638,13,638,14,0],[635,45,635,48,0],[635,29,635,43,0],[641,13,641,14,0],[642,17,642,74,0],[643,17,643,45,0],[644,13,644,14,0],[645,13,645,40,0],[646,13,646,14,0],[647,17,647,84,0],[648,13,648,14,0],[649,9,649,10,0],[652,9,652,10,0],[653,13,653,44,0],[654,13,654,33,0],[655,9,655,10,0],[658,9,658,10,0],[659,13,659,60,0],[660,13,660,73,0],[661,13,661,56,0],[662,13,662,14,0],[663,17,663,88,0],[664,17,664,40,0],[665,13,665,14,0],[666,9,666,10,0],[669,9,669,10,0],[671,13,671,29,0],[672,13,672,43,0],[673,13,673,28,0],[674,9,674,10,0],[677,9,677,10,0],[678,13,678,29,0],[679,13,679,42,0],[680,13,680,28,0],[681,9,681,10,0],[686,9,686,10,0],[687,13,687,71,0],[689,13,689,66,0],[690,13,690,14,0],[691,17,691,54,0],[692,17,692,42,0],[695,17,695,18,0],[696,21,696,56,0],[697,17,697,18,0],[698,17,698,38,0],[699,17,699,18,0],[700,21,700,94,0],[701,21,701,28,0],[703,17,703,37,0],[704,17,704,18,0],[705,21,705,51,0],[706,21,706,28,0],[710,17,710,94,0],[713,17,713,67,0],[716,17,716,64,0],[718,17,718,88,0],[719,17,719,113,0],[721,17,721,44,0],[723,17,723,94,0],[724,17,724,53,0],[726,17,728,50,0],[729,17,729,36,0],[731,17,731,60,0],[732,17,732,34,0],[734,13,734,14,0],[735,9,735,10,0],[42,9,42,79,0],[75,53,75,72,0],[102,62,102,93,0],[103,72,103,113,0],[104,61,104,91,0],[748,9,748,10,0],[749,13,749,38,0],[750,13,750,14,0],[751,17,751,29,0],[754,13,754,42,0],[755,9,755,10,0],[758,9,758,10,0],[759,13,759,43,0],[760,9,760,10,0],[763,9,763,10,0],[764,13,764,41,0],[765,9,765,10,0],[768,9,768,10,0],[769,13,769,74,0],[770,13,770,48,0],[771,9,771,10,0],[775,17,775,18,0],[775,19,775,29,0],[775,30,775,31,0],[387,13,387,14,0],[388,17,388,69,0],[389,17,389,48,0],[390,17,390,84,0],[391,13,391,14,0],[385,74,385,85,0]]);
+    </script>
+  </body>
+</html>

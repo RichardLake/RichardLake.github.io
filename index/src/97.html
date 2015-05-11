@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\tests\ckan\registry\registrylive.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using NUnit.Framework;
+
+namespace CKANTests
+{
+    /// &lt;summary&gt;
+    /// These are tests on a live registry extracted from one of the developers&#39;
+    /// systems.
+    /// &lt;/summary&gt;
+
+    [TestFixture]
+    public class RegistryLive
+    {
+        private static string test_registry = Tests.TestData.TestRegistry();
+        private Tests.DisposableKSP temp_ksp;
+        private CKAN.Registry registry;
+
+        [SetUp]
+        public void Setup()
+        {
+            // Make a fake KSP install
+            temp_ksp = new Tests.DisposableKSP(null, test_registry);
+
+            // Easy short-cut
+            registry = temp_ksp.KSP.Registry;
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            temp_ksp.Dispose();
+        }
+
+        [Test]
+        public void LatestAvailable()
+        {
+            CKAN.CkanModule module = 
+                registry.LatestAvailable(&quot;AGExt&quot;, temp_ksp.KSP.Version());
+
+            Assert.AreEqual(&quot;AGExt&quot;, module.identifier);
+            Assert.AreEqual(&quot;1.24a&quot;, module.version.ToString());
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[19,9,19,10,1],[21,13,21,69,1],[24,13,24,46,1],[25,9,25,10,1],[29,9,29,10,1],[30,13,30,32,1],[31,9,31,10,1],[35,9,35,10,1],[36,13,37,75,1],[39,13,39,57,1],[40,13,40,65,1],[41,9,41,10,1],[13,9,13,77,1]]);
+    </script>
+  </body>
+</html>

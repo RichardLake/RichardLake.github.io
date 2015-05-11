@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-core\converters\jsonsimplestringconverter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System;
+using Newtonsoft.Json;
+
+namespace CKAN {
+    // A lovely class for serialising things that can be converted
+    // to simple strings and back.
+
+    public class JsonSimpleStringConverter : JsonConverter {
+
+        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer) {
+            writer.WriteValue (value.ToString ());
+        }
+    
+        public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer) {
+
+            // If we find a null, then that might be okay, so we pass it down to our
+            // activator. Otherwise we convert to string, since that&#39;s our job.
+            string value = reader.Value == null ? null : reader.Value.ToString();
+            return Activator.CreateInstance (objectType, value);
+        }
+
+        public override bool CanConvert(Type objectType) {
+            // We *only* want to be triggered for types that have explicitly
+            // set an attribute in their class saying they can be converted.
+            // By returning false here, we declare we&#39;re not interested in participating
+            // in any other conversions.
+            return false;
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,58,22,59,0],[27,13,27,26,0],[28,9,28,10,0],[10,100,10,101,1],[11,13,11,51,1],[12,9,12,10,1],[14,126,14,127,1],[18,13,18,82,1],[19,13,19,65,1],[20,9,20,10,1]]);
+    </script>
+  </body>
+</html>

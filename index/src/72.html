@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\ckan-gui\tabcontroller.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using System.Collections.Generic;
+using System.Windows.Forms;
+
+namespace CKAN
+{
+
+    public class TabController
+    {
+
+        public TabController(TabControl control)
+        {
+            m_TabControl = control;
+            m_TabControl.Deselecting += OnDeselect;
+            m_TabControl.Selecting += OnDeselect;
+
+            foreach (TabPage page in m_TabControl.TabPages)
+            {
+                m_TabPages.Add(page.Name, page);
+            }
+
+            m_TabControl.TabPages.Clear();
+        }
+
+        public void ShowTab(string name, int index = 0, bool setActive = true)
+        {
+            if (m_TabControl.InvokeRequired)
+            {
+                m_TabControl.Invoke(new MethodInvoker(() =&gt; _ShowTab(name, index, setActive)));
+            }
+            else
+            {
+                _ShowTab(name, index, setActive);
+            }
+        }
+
+        public void HideTab(string name)
+        {
+            if (m_TabControl.InvokeRequired)
+            {
+                m_TabControl.Invoke(new MethodInvoker(() =&gt; _HideTab(name)));
+            }
+            else
+            {
+                _HideTab(name);
+            }
+        }
+
+        public void RenameTab(string name, string newDisplayName)
+        {
+            if (m_TabControl.InvokeRequired)
+            {
+
+                m_TabControl.Invoke(new MethodInvoker(() =&gt; _RenameTab(name, newDisplayName)));
+            }
+            else
+            {
+                _RenameTab(name, newDisplayName);
+            }
+        }
+
+        public void SetTabLock(bool state)
+        {
+            if (m_TabControl.InvokeRequired)
+            {
+                m_TabControl.Invoke(new MethodInvoker(() =&gt; _SetTabLock(state)));
+            }
+            else
+            {
+                _SetTabLock(state);
+            }
+        }
+
+        public void SetActiveTab(string name)
+        {
+            if(m_TabControl.InvokeRequired)
+            {
+                m_TabControl.Invoke(new MethodInvoker(() =&gt; _SetActiveTab(name)));
+            }
+            else
+            {
+                _SetActiveTab(name);
+            }
+        }
+
+        private void _ShowTab(string name, int index = 0, bool setActive = true)
+        {
+            if (m_TabControl.TabPages.Contains(m_TabPages[name]))
+            {
+                if (setActive)
+                {
+                    SetActiveTab(name);
+                }
+
+                return;
+            }
+
+            if (index &gt; m_TabControl.TabPages.Count)
+            {
+                index = m_TabControl.TabPages.Count;
+            }
+
+            m_TabControl.TabPages.Insert(index, m_TabPages[name]);
+
+            if (setActive)
+            {
+                SetActiveTab(name);
+            }
+        }
+
+        private void _HideTab(string name)
+        {
+            m_TabControl.TabPages.Remove(m_TabPages[name]);
+        }
+
+        public void _RenameTab(string name, string newDisplayName)
+        {
+            m_TabPages[name].Text = newDisplayName;
+        }
+
+        private void _SetTabLock(bool state)
+        {
+            m_TabLock = state;
+        }
+
+        private void _SetActiveTab(string name)
+        {
+            var tabLock = m_TabLock;
+            m_TabLock = false;
+            m_TabControl.SelectTab(m_TabPages[name]);
+            m_TabLock = tabLock;
+        }
+
+        private void OnDeselect(object sender, TabControlCancelEventArgs args)
+        {
+            if (m_TabLock)
+            {
+                args.Cancel = true;
+            }
+        }
+
+        private TabControl m_TabControl;
+
+        private bool m_TabLock;
+
+        public Dictionary&lt;string, TabPage&gt; m_TabPages = new Dictionary&lt;string, TabPage&gt;();
+
+    }
+
+
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[145,9,145,91,0],[10,9,10,49,0],[11,9,11,10,0],[12,13,12,36,0],[13,13,13,52,0],[14,13,14,50,0],[16,13,16,20,0],[16,38,16,59,0],[16,22,16,34,0],[17,13,17,14,0],[18,17,18,49,0],[19,13,19,14,0],[16,35,16,37,0],[21,13,21,43,0],[22,9,22,10,0],[25,9,25,10,0],[26,13,26,45,0],[27,13,27,14,0],[28,17,28,61,0],[28,93,28,96,0],[29,13,29,14,0],[31,13,31,14,0],[32,17,32,50,0],[33,13,33,14,0],[34,9,34,10,0],[37,9,37,10,0],[38,13,38,45,0],[39,13,39,14,0],[40,17,40,61,0],[40,75,40,78,0],[41,13,41,14,0],[43,13,43,14,0],[44,17,44,32,0],[45,13,45,14,0],[46,9,46,10,0],[49,9,49,10,0],[50,13,50,45,0],[51,13,51,14,0],[53,17,53,61,0],[53,93,53,96,0],[54,13,54,14,0],[56,13,56,14,0],[57,17,57,50,0],[58,13,58,14,0],[59,9,59,10,0],[62,9,62,10,0],[63,13,63,45,0],[64,13,64,14,0],[65,17,65,61,0],[65,79,65,82,0],[66,13,66,14,0],[68,13,68,14,0],[69,17,69,36,0],[70,13,70,14,0],[71,9,71,10,0],[74,9,74,10,0],[75,13,75,44,0],[76,13,76,14,0],[77,17,77,61,0],[77,80,77,83,0],[78,13,78,14,0],[80,13,80,14,0],[81,17,81,37,0],[82,13,82,14,0],[83,9,83,10,0],[86,9,86,10,0],[87,13,87,66,0],[88,13,88,14,0],[89,17,89,31,0],[90,17,90,18,0],[91,21,91,40,0],[92,17,92,18,0],[94,17,94,24,0],[97,13,97,53,0],[98,13,98,14,0],[99,17,99,53,0],[100,13,100,14,0],[102,13,102,67,0],[104,13,104,27,0],[105,13,105,14,0],[106,17,106,36,0],[107,13,107,14,0],[108,9,108,10,0],[111,9,111,10,0],[112,13,112,60,0],[113,9,113,10,0],[116,9,116,10,0],[117,13,117,52,0],[118,9,118,10,0],[121,9,121,10,0],[122,13,122,31,0],[123,9,123,10,0],[126,9,126,10,0],[127,13,127,37,0],[128,13,128,31,0],[129,13,129,54,0],[130,13,130,33,0],[131,9,131,10,0],[134,9,134,10,0],[135,13,135,27,0],[136,13,136,14,0],[137,17,137,36,0],[138,13,138,14,0],[139,9,139,10,0],[28,61,28,93,0],[40,61,40,75,0],[53,61,53,93,0],[65,61,65,79,0],[77,61,77,80,0]]);
+    </script>
+  </body>
+</html>
