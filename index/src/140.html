@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>c:\users\richard\documents\ckansplit\netkan\tests\netkan\avc.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+using Newtonsoft.Json;
+using NUnit.Framework;
+
+namespace Tests.NetKAN
+{
+    [TestFixture]
+    public class AVC
+    {
+        [Test]
+        public void Json()
+        {
+            string json = TestData.KspAvcJson();
+
+            var avc = JsonConvert.DeserializeObject&lt;global::CKAN.NetKAN.AVC&gt;(json);
+
+            Assert.AreEqual(&quot;0.24.2&quot;, avc.ksp_version.ToString());
+            Assert.AreEqual(&quot;0.24.0&quot;, avc.ksp_version_min.ToString());
+            Assert.AreEqual(&quot;0.24.2&quot;, avc.ksp_version_max.ToString());
+        }
+
+        [Test]
+        public void JsonOneLineVersion()
+        {
+            string json = TestData.KspAvcJsonOneLineVersion ();
+
+            var avc = JsonConvert.DeserializeObject&lt;global::CKAN.NetKAN.AVC&gt;(json);
+
+            Assert.AreEqual(&quot;0.24.2&quot;, avc.ksp_version.ToString());
+            Assert.AreEqual(&quot;0.24.0&quot;, avc.ksp_version_min.ToString());
+            Assert.AreEqual(&quot;1.0.0&quot;, avc.ksp_version_max.ToString());
+        }
+    }
+}
+
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[11,9,11,10,1],[12,13,12,49,1],[14,13,14,84,1],[16,13,16,67,1],[17,13,17,71,1],[18,13,18,71,1],[19,9,19,10,1],[23,9,23,10,1],[24,13,24,64,1],[26,13,26,84,1],[28,13,28,67,1],[29,13,29,71,1],[30,13,30,70,1],[31,9,31,10,1]]);
+    </script>
+  </body>
+</html>
